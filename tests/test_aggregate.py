@@ -1,9 +1,10 @@
+from datetime import datetime, timedelta
 from pathlib import Path
 import pytest
 from access_log_db.store import create_case, open_case
 from access_log_db.custom_fields import add_custom_field, set_custom_value
 from access_log_db.import_log import import_file
-from access_log_db.aggregate import Metric, aggregate
+from access_log_db.aggregate import Metric, _bucket_start, aggregate
 from access_log_db.errors import AppError
 from access_log_db.filters import Condition
 
@@ -193,6 +194,16 @@ def test_minute_bucket_floors_wall_clock(tmp_path: Path):
         ("2024-10-10T12:00:00", 3)
     ]
     conn.close()
+
+
+def test_elapsed_time_buckets_cross_calendar_units():
+    assert _bucket_start(
+        "2024-10-10T12:30:00", 90, "minute"
+    ) == _bucket_start("2024-10-10T13:10:00", 90, "minute")
+
+    first = datetime.fromisoformat(_bucket_start("2024-10-10T12:00:00", 36, "hour"))
+    second = datetime.fromisoformat(_bucket_start("2024-10-11T12:00:00", 36, "hour"))
+    assert second - first == timedelta(hours=36)
 
 
 def test_keyset_pages_and_negative_offset(tmp_path: Path, monkeypatch):

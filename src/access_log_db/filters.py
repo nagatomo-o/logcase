@@ -144,16 +144,27 @@ def fetch_rows(
         r["name"]
         for r in conn.execute("SELECT name FROM custom_fields ORDER BY display_order")
     ]
+    row_ids = [row["row_id"] for row in rows]
+    values_by_row: dict[int, dict[str, sqlite3.Row]] = {}
+    customs_by_row: dict[int, dict[str, sqlite3.Row]] = {}
+    if row_ids:
+        placeholders = ",".join("?" for _ in row_ids)
+        for value in conn.execute(
+            "SELECT row_id, identifier, is_unset, str_value, num_value "
+            f"FROM log_values WHERE row_id IN ({placeholders})",
+            row_ids,
+        ):
+            values_by_row.setdefault(value["row_id"], {})[value["identifier"]] = value
+        for value in conn.execute(
+            "SELECT row_id, name, is_unset, str_value "
+            f"FROM custom_values WHERE row_id IN ({placeholders})",
+            row_ids,
+        ):
+            customs_by_row.setdefault(value["row_id"], {})[value["name"]] = value
     out: list[dict] = []
     for row in rows:
         item: dict = {}
-        values = {
-            v["identifier"]: v
-            for v in conn.execute(
-                "SELECT identifier, is_unset, str_value, num_value FROM log_values WHERE row_id=?",
-                (row["row_id"],),
-            )
-        }
+        values = values_by_row.get(row["row_id"], {})
         for ident in log_fields:
             if field_types[ident] == "datetime":
                 item[ident] = row["time_display"]
@@ -165,13 +176,7 @@ def fetch_rows(
                 item[ident] = val["num_value"]
             else:
                 item[ident] = val["str_value"]
-        customs = {
-            v["name"]: v
-            for v in conn.execute(
-                "SELECT name, is_unset, str_value FROM custom_values WHERE row_id=?",
-                (row["row_id"],),
-            )
-        }
+        customs = customs_by_row.get(row["row_id"], {})
         for name in custom_names:
             val = customs.get(name)
             if val is None or val["is_unset"]:

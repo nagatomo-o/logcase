@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from access_log_db.app import create_app
+from access_log_db.store import open_case
 
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
@@ -33,6 +34,40 @@ def test_loopback_factory_has_no_auth(tmp_path: Path):
     assert app.config["TESTING"] is False or True
     client = app.test_client()
     assert client.get("/").status_code == 200
+
+
+def test_non_loopback_host_is_forbidden(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+
+    rv = client.get("/", environ_overrides={"HTTP_HOST": "evil.example"})
+
+    assert rv.status_code == 403
+
+
+def test_plain_import_preserves_unicode_line_separator(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    line = (
+        '127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] '
+        '"GET /before\u2028after HTTP/1.0" 200 1\n'
+    )
+
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(line.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+
+    conn = open_case(tmp_path, cid)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT read_count FROM import_files"
+        ).fetchone()["read_count"] == 1
+    finally:
+        conn.close()
 
 
 def test_aggregate_export_without_result_returns_work_with_400(tmp_path: Path):

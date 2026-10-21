@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import secrets
 import socket
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 from flask import (
     Flask,
     Response,
+    abort,
     flash,
     redirect,
     render_template,
@@ -89,6 +91,14 @@ def create_app(data_dir: Path | None = None) -> Flask:
     root.mkdir(parents=True, exist_ok=True)
     app.config["DATA_DIR"] = root
     app.config.setdefault("AGGREGATE_CACHE", {})
+
+    @app.before_request
+    def require_loopback_host():
+        hostname, separator, port = request.host.lower().partition(":")
+        if hostname not in {"127.0.0.1", "localhost"} or (
+            separator and not port.isdigit()
+        ):
+            abort(403)
 
     @app.get("/")
     def cases_view():
@@ -228,8 +238,13 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 if name.lower().endswith(".gz"):
                     result = import_gzip_bytes(conn, name, data)
                 else:
-                    text = data.decode("utf-8", errors="replace")
-                    result = import_file(conn, name, text.splitlines(keepends=True))
+                    with io.TextIOWrapper(
+                        io.BytesIO(data),
+                        encoding="utf-8",
+                        errors="replace",
+                        newline="",
+                    ) as text:
+                        result = import_file(conn, name, text)
                 app.config["AGGREGATE_CACHE"].pop(case_id, None)
                 flash(
                     msg(

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from access_log_db.errors import AppError
@@ -29,18 +29,16 @@ def _has_time_axis(conn: sqlite3.Connection) -> bool:
 
 def _bucket_start(wall: str, n: int, unit: str) -> str:
     dt = datetime.strptime(wall, "%Y-%m-%dT%H:%M:%S")
-    if unit == "hour":
-        hour = (dt.hour // n) * n
-        dt = dt.replace(hour=hour, minute=0, second=0, microsecond=0)
-    elif unit == "minute":
-        minute = (dt.minute // n) * n
-        dt = dt.replace(minute=minute, second=0, microsecond=0)
-    elif unit == "second":
-        second = (dt.second // n) * n
-        dt = dt.replace(second=second, microsecond=0)
-    else:
+    unit_seconds = {"second": 1, "minute": 60, "hour": 3600}.get(unit)
+    if unit_seconds is None:
         raise AppError("E_WRK_RNG01", MSG["E_WRK_RNG01"])
-    return dt.strftime("%Y-%m-%dT%H:%M:%S")
+    epoch = datetime(1970, 1, 1)
+    elapsed = dt - epoch
+    total_seconds = elapsed.days * 86400 + elapsed.seconds
+    bucket_seconds = n * unit_seconds
+    start_seconds = (total_seconds // bucket_seconds) * bucket_seconds
+    start = epoch + timedelta(seconds=start_seconds)
+    return start.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _page_time_abs(

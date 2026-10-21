@@ -1,4 +1,5 @@
 from pathlib import Path
+from access_log_db.custom_fields import add_custom_field, set_custom_value
 from access_log_db.store import create_case, open_case
 from access_log_db.import_log import import_file
 from access_log_db.filters import Condition, count_rows, fetch_rows
@@ -46,6 +47,32 @@ def test_keyset(tmp_path: Path):
     assert [r["row_id"] for r in page1] == [1, 2]
     page2 = fetch_rows(conn, [], after_row_id=2, limit=2)
     assert [r["row_id"] for r in page2] == [3]
+    conn.close()
+
+
+def test_fetch_rows_batches_value_queries(tmp_path: Path):
+    conn = _conn(tmp_path)
+    add_custom_field(conn, "note")
+    set_custom_value(conn, 2, "note", "batched")
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+
+    rows = fetch_rows(conn, [], after_row_id=0)
+
+    conn.set_trace_callback(None)
+    log_queries = [
+        sql for sql in statements
+        if "FROM log_values" in sql and sql.lstrip().upper().startswith("SELECT")
+    ]
+    custom_queries = [
+        sql for sql in statements
+        if "FROM custom_values" in sql and sql.lstrip().upper().startswith("SELECT")
+    ]
+    assert len(log_queries) == 1
+    assert " IN (" in log_queries[0]
+    assert len(custom_queries) == 1
+    assert " IN (" in custom_queries[0]
+    assert rows[1]["note"] == "batched"
     conn.close()
 
 
