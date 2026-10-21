@@ -1,7 +1,10 @@
+import sqlite3
 from pathlib import Path
+from uuid import uuid1, uuid4
+
 import pytest
 from access_log_db.errors import AppError
-from access_log_db.store import create_case, list_cases, rename_case, delete_case
+from access_log_db.store import create_case, list_cases, open_case, rename_case, delete_case
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 
@@ -29,8 +32,55 @@ def test_missing_case(tmp_path: Path):
     assert ei.value.code == "E_CSE_EXS01"
 
 
+def test_list_cases_unreadable_v4_file_sets_error(tmp_path: Path):
+    case_id = str(uuid4())
+    path = tmp_path / f"{case_id}.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE meta (name TEXT, logformat TEXT);
+        CREATE TABLE import_files (imported_at TEXT);
+        CREATE TABLE log_rows (row_id INTEGER);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    rows = list_cases(tmp_path)
+
+    assert rows == [{"id": case_id, "error": path.name}]
+
+
+def test_list_cases_skips_non_v4_name(tmp_path: Path):
+    cid = create_case(tmp_path, "案件A", COMMON)
+    v1 = str(uuid1())
+    src = tmp_path / f"{cid}.sqlite"
+    dest = tmp_path / f"{v1}.sqlite"
+    src.rename(dest)
+
+    rows = list_cases(tmp_path)
+
+    assert rows == [{"id": v1, "error": dest.name}]
+
+
+def test_open_rename_reject_non_v4_and_hyphenless(tmp_path: Path):
+    v1 = str(uuid1())
+    bare = uuid4().hex
+    for case_id in (v1, bare):
+        (tmp_path / f"{case_id}.sqlite").write_bytes(b"x")
+        with pytest.raises(AppError) as opened:
+            open_case(tmp_path, case_id)
+        assert opened.value.code == "E_CSE_EXS01"
+        with pytest.raises(AppError) as renamed:
+            rename_case(tmp_path, case_id, "x")
+        assert renamed.value.code == "E_CSE_EXS01"
+        with pytest.raises(AppError) as deleted:
+            delete_case(tmp_path, case_id)
+        assert deleted.value.code == "E_CSE_EXS01"
+        assert (tmp_path / f"{case_id}.sqlite").is_file()
+
+
 def test_log_fields_persisted(tmp_path: Path):
-    from access_log_db.store import open_case
     cid = create_case(tmp_path, "t", COMMON)
     conn = open_case(tmp_path, cid)
     ids = [r["identifier"] for r in conn.execute(

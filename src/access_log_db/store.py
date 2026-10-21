@@ -75,15 +75,23 @@ def case_path(data_dir: Path, case_id: str) -> Path:
     return data_dir / f"{case_id}.sqlite"
 
 
+def _public_case_id(case_id: str) -> UUID | None:
+    try:
+        parsed = UUID(case_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if parsed.version != 4 or str(parsed) != case_id:
+        return None
+    return parsed
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
 
 
 def open_case(data_dir: Path, case_id: str) -> sqlite3.Connection:
-    try:
-        UUID(case_id)
-    except ValueError as exc:
-        raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"]) from exc
+    if _public_case_id(case_id) is None:
+        raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     path = case_path(data_dir, case_id)
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
@@ -134,19 +142,20 @@ def list_cases(data_dir: Path) -> list[dict]:
         return []
     rows: list[dict] = []
     for path in sorted(data_dir.glob("*.sqlite")):
-        try:
-            UUID(path.stem)
-        except ValueError:
+        if _public_case_id(path.stem) is None:
             rows.append({"id": path.stem, "error": path.name})
             continue
+        conn = None
         try:
             conn = sqlite3.connect(path)
             conn.row_factory = sqlite3.Row
             meta = conn.execute("SELECT name, logformat FROM meta").fetchone()
+            if meta is None:
+                rows.append({"id": path.stem, "error": path.name})
+                continue
             file_count = conn.execute("SELECT COUNT(*) FROM import_files").fetchone()[0]
             row_count = conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0]
             last = conn.execute("SELECT MAX(imported_at) FROM import_files").fetchone()[0]
-            conn.close()
             head = (meta["logformat"] or "")[:80]
             rows.append(
                 {
@@ -159,8 +168,11 @@ def list_cases(data_dir: Path) -> list[dict]:
                     "error": None,
                 }
             )
-        except sqlite3.Error:
+        except Exception:
             rows.append({"id": path.stem, "error": path.name})
+        finally:
+            if conn is not None:
+                conn.close()
     return rows
 
 
@@ -173,10 +185,8 @@ def rename_case(data_dir: Path, case_id: str, name: str) -> None:
 
 
 def delete_case(data_dir: Path, case_id: str) -> None:
-    try:
-        UUID(case_id)
-    except ValueError as exc:
-        raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"]) from exc
+    if _public_case_id(case_id) is None:
+        raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     path = case_path(data_dir, case_id)
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
