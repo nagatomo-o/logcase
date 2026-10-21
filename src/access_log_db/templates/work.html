@@ -123,9 +123,17 @@ document.getElementById("add-filter").addEventListener("click", function () {
 <form method="post" action="/cases/{{ case_id }}/bulk">
   <select name="name">{% for name in custom_names %}<option>{{ name }}</option>{% endfor %}</select>
   <input name="value">
-  <input type="hidden" name="confirm" value="1">
-  <button onclick="return confirm('一括更新します。よろしいですか。')">一括実行</button>
+  <button>一括実行</button>
 </form>
+{% if bulk_confirm %}
+  <p>{{ bulk_confirm.warning }}</p>
+  <form method="post" action="/cases/{{ case_id }}/bulk">
+    <input type="hidden" name="confirm" value="1">
+    <input type="hidden" name="name" value="{{ bulk_confirm.name }}">
+    <input type="hidden" name="value" value="{{ bulk_confirm.value }}">
+    <button>確認して一括実行</button>
+  </form>
+{% endif %}
 
 <h2>集計</h2>
 <form method="post" action="/cases/{{ case_id }}/aggregate">

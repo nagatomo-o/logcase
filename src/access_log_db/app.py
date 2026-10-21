@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import secrets
+import socket
 import sys
 from pathlib import Path
 
@@ -48,8 +49,27 @@ def _allowed_filename(name: str) -> bool:
     return lower.endswith(".gz") or lower.endswith("access_log") or "." not in Path(name).name
 
 
-def _session_conditions() -> list[Condition]:
-    return conditions_from_spec(session.get("filters") or [])
+def _case_specs(case_id: str) -> list[dict]:
+    return (session.get("filters_by_case") or {}).get(case_id) or []
+
+
+def _session_conditions(case_id: str) -> list[Condition]:
+    return conditions_from_spec(_case_specs(case_id))
+
+
+def _set_case_filters(case_id: str, spec: list[dict]) -> None:
+    filters = dict(session.get("filters_by_case") or {})
+    filters[case_id] = spec
+    session["filters_by_case"] = filters
+
+
+def _valid_filter_op(field_type: str, operator: str) -> bool:
+    allowed = {
+        "string": {"contains", "not_contains", "starts", "not_starts", "in", "gte", "lte"},
+        "number": {"eq", "ne", "gt", "ge", "lt", "le", "unset"},
+        "datetime": {"eq", "before", "on_or_after", "after", "on_or_before", "unset"},
+    }
+    return operator in allowed.get(field_type, set())
 
 
 def create_app(data_dir: Path | None = None) -> Flask:
@@ -58,6 +78,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
     root = Path(data_dir) if data_dir is not None else Path.cwd() / "data"
     root.mkdir(parents=True, exist_ok=True)
     app.config["DATA_DIR"] = root
+    app.config.setdefault("AGGREGATE_CACHE", {})
 
     @app.get("/")
     def cases_view():
@@ -115,7 +136,16 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 "SELECT source_filename, read_count, imported_at "
                 "FROM import_files ORDER BY id"
             ).fetchall()
-            conditions = _session_conditions()
+            try:
+                conditions = _session_conditions(case_id)
+                match_count = count_rows(conn, conditions)
+                rows = fetch_rows(conn, conditions, after)
+            except (AppError, KeyError, ValueError) as exc:
+                _set_case_filters(case_id, [])
+                flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+                conditions = []
+                match_count = count_rows(conn, conditions)
+                rows = fetch_rows(conn, conditions, after)
             return {
                 "case_id": case_id,
                 "case_name": meta["name"],
@@ -123,11 +153,12 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 "log_fields": log_fields,
                 "custom_names": custom_names,
                 "imports": imports,
-                "match_count": count_rows(conn, conditions),
-                "rows": fetch_rows(conn, conditions, after),
+                "match_count": match_count,
+                "rows": rows,
                 "named": list_named_filters(conn),
-                "aggregate_rows": session.get("aggregate_rows") or [],
+                "aggregate_rows": app.config["AGGREGATE_CACHE"].get(case_id) or [],
                 "warn_custom_del": MSG["W_WRK_BIZ04"],
+                "bulk_confirm": None,
             }
         finally:
             conn.close()
@@ -153,15 +184,16 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/import")
     def work_import(case_id: str):
-        files = request.files.getlist("files")
-        if not files or all(not item.filename for item in files):
-            flash(MSG["E_WRK_REQ01"])
-            return redirect(url_for("work_view", case_id=case_id))
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
             flash(exc.message)
             return redirect(url_for("cases_view"))
+        files = request.files.getlist("files")
+        if not files or all(not item.filename for item in files):
+            conn.close()
+            flash(MSG["E_WRK_REQ01"])
+            return redirect(url_for("work_view", case_id=case_id))
         existing = {
             row[0] for row in conn.execute("SELECT source_filename FROM import_files")
         }
@@ -199,8 +231,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
     @app.post("/cases/<case_id>/filter")
     def work_filter(case_id: str):
         if request.form.get("clear") == "1":
-            session["filters"] = []
-            session["aggregate_rows"] = []
+            _set_case_filters(case_id, [])
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
             return redirect(url_for("work_view", case_id=case_id))
         identifiers = request.form.getlist("identifier")
         operators = request.form.getlist("op")
@@ -209,6 +241,10 @@ def create_app(data_dir: Path | None = None) -> Flask:
         try:
             for encoded, operator, value in zip(identifiers, operators, values):
                 source, field_type, identifier = encoded.split(":", 2)
+                if source not in {"log", "custom"} or not _valid_filter_op(
+                    field_type, operator
+                ):
+                    raise ValueError
                 spec.append(
                     {
                         "identifier": identifier,
@@ -219,20 +255,36 @@ def create_app(data_dir: Path | None = None) -> Flask:
                     }
                 )
         except ValueError:
-            flash(MSG["E_WRK_FMT04"])
+            flash(MSG["E_WRK_FMT05"])
             return redirect(url_for("work_view", case_id=case_id))
-        session["filters"] = spec
-        session["aggregate_rows"] = []
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
+        try:
+            count_rows(conn, conditions_from_spec(spec))
+        except (AppError, KeyError, ValueError) as exc:
+            flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+            return redirect(url_for("work_view", case_id=case_id))
+        finally:
+            conn.close()
+        _set_case_filters(case_id, spec)
+        app.config["AGGREGATE_CACHE"].pop(case_id, None)
         return redirect(url_for("work_view", case_id=case_id))
 
     @app.post("/cases/<case_id>/filter/save")
     def work_filter_save(case_id: str):
-        conn = open_case(root, case_id)
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         try:
             save_named_filter(
                 conn,
                 request.form.get("name", ""),
-                session.get("filters") or [],
+                _case_specs(case_id),
                 overwrite=request.form.get("overwrite") == "1",
             )
             flash(MSG["S_WRK_OK02"])
@@ -244,21 +296,29 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/filter/load")
     def work_filter_load(case_id: str):
-        conn = open_case(root, case_id)
         try:
-            session["filters"] = load_named_filter(
-                conn, request.form.get("name", "")
-            )
-            session["aggregate_rows"] = []
+            conn = open_case(root, case_id)
         except AppError as exc:
             flash(exc.message)
+            return redirect(url_for("cases_view"))
+        try:
+            spec = load_named_filter(conn, request.form.get("name", ""))
+            count_rows(conn, conditions_from_spec(spec))
+            _set_case_filters(case_id, spec)
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
+        except (AppError, KeyError, ValueError) as exc:
+            flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
         finally:
             conn.close()
         return redirect(url_for("work_view", case_id=case_id))
 
     @app.post("/cases/<case_id>/custom")
     def work_custom(case_id: str):
-        conn = open_case(root, case_id)
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         try:
             add_custom_field(conn, request.form.get("name", ""))
         except AppError as exc:
@@ -272,7 +332,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
         if request.form.get("confirm") != "1":
             flash(MSG["W_WRK_BIZ04"])
             return redirect(url_for("work_view", case_id=case_id))
-        conn = open_case(root, case_id)
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         try:
             delete_custom_field(conn, request.form.get("name", ""))
         except AppError as exc:
@@ -283,7 +347,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/cell")
     def work_cell(case_id: str):
-        conn = open_case(root, case_id)
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         try:
             set_custom_value(
                 conn,
@@ -299,16 +367,34 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/bulk")
     def work_bulk(case_id: str):
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         if request.form.get("confirm") != "1":
-            flash(msg("W_WRK_BIZ02", target_count="?"))
-            return redirect(url_for("work_view", case_id=case_id))
-        conn = open_case(root, case_id)
+            try:
+                target_count = count_rows(conn, _session_conditions(case_id))
+                warning = msg("W_WRK_BIZ02", target_count=target_count)
+                flash(warning)
+                context = _work_context(case_id)
+                context["bulk_confirm"] = {
+                    "name": request.form.get("name", ""),
+                    "value": request.form.get("value", ""),
+                    "warning": warning,
+                }
+                return render_template("work.html", **context)
+            except (AppError, KeyError, ValueError) as exc:
+                flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+                return redirect(url_for("work_view", case_id=case_id))
+            finally:
+                conn.close()
         try:
             bulk_set_custom(
                 conn,
                 request.form.get("name", ""),
                 request.form.get("value", ""),
-                _session_conditions(),
+                _session_conditions(case_id),
             )
             flash(MSG["S_WRK_OK01"])
         except AppError as exc:
@@ -319,7 +405,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/aggregate")
     def work_aggregate(case_id: str):
-        conn = open_case(root, case_id)
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
         try:
             groups = []
             for item in request.form.getlist("group"):
@@ -339,8 +429,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
                         request.form.get("metric_fn") or "count",
                     )
                 )
-            session["aggregate_rows"] = aggregate(
-                conn, _session_conditions(), groups, bucket, metrics
+            app.config["AGGREGATE_CACHE"][case_id] = aggregate(
+                conn, _session_conditions(case_id), groups, bucket, metrics
             )
         except AppError as exc:
             flash(exc.message)
@@ -352,9 +442,13 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/export/rows")
     def export_rows(case_id: str):
-        conn = open_case(root, case_id)
         try:
-            data = rows_csv_bytes(conn, _session_conditions())
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            flash(exc.message)
+            return redirect(url_for("cases_view"))
+        try:
+            data = rows_csv_bytes(conn, _session_conditions(case_id))
         except AppError as exc:
             flash(exc.message)
             return redirect(url_for("work_view", case_id=case_id))
@@ -368,7 +462,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/export/aggregate")
     def export_aggregate(case_id: str):
-        rows = session.get("aggregate_rows") or []
+        rows = app.config["AGGREGATE_CACHE"].get(case_id) or []
         if not rows:
             try:
                 context = _work_context(case_id)
@@ -393,9 +487,14 @@ def main(argv: list[str] | None = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     app = create_app(data_dir)
     try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", args.port))
+        finally:
+            probe.close()
         print(f"http://127.0.0.1:{args.port}/", flush=True)
         app.run(host="127.0.0.1", port=args.port, threaded=False)
-    except OSError:
+    except (OSError, OverflowError):
         print(MSG["E_LCH_SYS01"], file=sys.stderr)
         return 1
     return 0
