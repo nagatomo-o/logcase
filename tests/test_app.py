@@ -229,3 +229,15 @@ def test_mutations_clear_case_aggregate_cache(tmp_path: Path):
     cache[cid] = [{"stale": "case-delete"}]
     client.post(f"/cases/{cid}/delete", data={"confirm": "1"})
     assert cid not in cache
+
+
+def test_work_page_metric_select_has_empty_option(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    html = client.get(f"/cases/{cid}").data.decode("utf-8")
+    start = html.index('<select name="metric_id">')
+    select = html[start : html.index("</select>", start)]
+
+    assert '<option value=""></option>' in select

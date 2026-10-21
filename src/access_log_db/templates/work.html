@@ -185,6 +185,7 @@ document.getElementById("add-filter").addEventListener("click", function () {
     <option value="hour">時間</option>
   </select>
   <select name="metric_id">
+    <option value=""></option>
     {% for f in log_fields if f.field_type == "number" %}
       <option value="{{ f.identifier }}">{{ f.identifier }}</option>
     {% endfor %}
