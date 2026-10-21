@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
 
 from access_log_db.errors import LogFormatError
 
@@ -118,3 +120,58 @@ def compile_logformat(text: str) -> CompiledFormat:
             "E_CSE_FMT02", "LogFormatを解釈できません。指定子を確認してください。"
         )
     return CompiledFormat(fields=fields, pattern=compiled)
+
+
+TEMP_QUOTE = "``"
+
+
+@dataclass
+class ParsedValue:
+    identifier: str
+    is_unset: bool
+    str_value: Optional[str]
+    num_value: Optional[int]
+
+
+@dataclass
+class ParsedLine:
+    values: list[ParsedValue]
+    time_display: Optional[str]
+    time_abs: Optional[datetime]
+    time_offset: Optional[str]
+
+
+def parse_line(compiled: CompiledFormat, line: str) -> Optional[ParsedLine]:
+    if line == "":
+        return None
+    escaped = line.replace('\\"', TEMP_QUOTE)
+    match = compiled.pattern.match(escaped)
+    if match is None or len(match.groups()) != len(compiled.fields):
+        return None
+    values: list[ParsedValue] = []
+    time_display = None
+    time_abs = None
+    time_offset = None
+    for i, field in enumerate(compiled.fields):
+        raw = match.group(i + 1)
+        raw = raw.replace(TEMP_QUOTE, '"')
+        if field.field_type == "number":
+            if raw == "-":
+                if field.key == "b":
+                    values.append(ParsedValue(field.identifier, False, None, 0))
+                else:
+                    values.append(ParsedValue(field.identifier, True, None, None))
+            else:
+                values.append(ParsedValue(field.identifier, False, None, int(raw)))
+        elif field.field_type == "datetime":
+            time_display = raw
+            try:
+                time_abs = datetime.strptime(raw, "%d/%b/%Y:%H:%M:%S %z")
+                time_offset = raw[-5:]
+            except ValueError:
+                time_abs = None
+                time_offset = None
+            values.append(ParsedValue(field.identifier, time_abs is None, raw, None))
+        else:
+            values.append(ParsedValue(field.identifier, False, raw, None))
+    return ParsedLine(values, time_display, time_abs, time_offset)
