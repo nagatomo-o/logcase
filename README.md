@@ -3,10 +3,8 @@
 ## 起動
 
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-python -m access_log_db.app
+.\scripts\run.ps1
 ```
 
-ブラウザで表示された `http://127.0.0.1:8765/` を開く。待受はループバックのみ。
+表示された `http://127.0.0.1:8765/` をブラウザで開く。待受はループバックのみ。
+ポートを変える場合は `.\scripts\run.ps1 --port 9000` のように指定する。

@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ case_name }}{% endblock %}
+{% block body %}
+<p><a href="/">一覧へ戻る</a></p>
+<h1>{{ case_name }}</h1>
+<h2>LogFormat</h2>
+<pre>{{ logformat }}</pre>
+
+<h2>列</h2>
+<table>
+  {% for f in log_fields %}
+    <tr><td>{{ f.identifier }}</td><td>{{ f.field_type }}</td><td>{% if f.time_axis %}時間軸{% endif %}</td></tr>
+  {% endfor %}
+</table>
+<form method="post" action="/cases/{{ case_id }}/custom">
+  <input name="name" placeholder="カスタムフィールド名">
+  <button>カスタム追加</button>
+</form>
+{% for name in custom_names %}
+  <form method="post" action="/cases/{{ case_id }}/custom/delete">
+    {{ name }}
+    <input type="hidden" name="name" value="{{ name }}">
+    <input type="hidden" name="confirm" value="1">
+    <button onclick="return confirm('{{ warn_custom_del }}')">削除</button>
+  </form>
+{% endfor %}
+
+<h2>取り込み</h2>
+<form method="post" action="/cases/{{ case_id }}/import" enctype="multipart/form-data">
+  <input type="file" name="files" multiple>
+  <label><input type="checkbox" name="confirm_same_name" value="1"> 同名を追加</label>
+  <button>取り込み開始</button>
+</form>
+<table>
+  {% for f in imports %}
+    <tr><td>{{ f.source_filename }}</td><td>{{ f.read_count }}</td><td>{{ f.imported_at }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>フィルタ</h2>
+<p>一致件数: {{ match_count }}</p>
+<form method="post" action="/cases/{{ case_id }}/filter">
+  <div class="filter-condition">
+    <select name="identifier">
+      {% for f in log_fields %}<option value="log:{{ f.field_type }}:{{ f.identifier }}">{{ f.identifier }}</option>{% endfor %}
+      {% for name in custom_names %}<option value="custom:string:{{ name }}">{{ name }}</option>{% endfor %}
+    </select>
+    <select name="op">
+      <option value="contains">含む</option>
+      <option value="not_contains">含まない</option>
+      <option value="starts">始まる</option>
+      <option value="not_starts">始まらない</option>
+      <option value="in">複数選択</option>
+      <option value="gte">以上</option>
+      <option value="lte">以下</option>
+      <option value="unset">未設定</option>
+      <option value="eq">等しい</option>
+      <option value="ne">等しくない</option>
+      <option value="gt">より大きい</option>
+      <option value="ge">以上(数値)</option>
+      <option value="lt">より小さい</option>
+      <option value="le">以下(数値)</option>
+      <option value="before">より前</option>
+      <option value="on_or_after">以降</option>
+      <option value="after">より後</option>
+      <option value="on_or_before">以前</option>
+    </select>
+    <input name="value">
+  </div>
+  <button type="button" id="add-filter">条件追加</button>
+  <button>適用</button>
+  <button name="clear" value="1">解除</button>
+</form>
+<script>
+document.getElementById("add-filter").addEventListener("click", function () {
+  const first = document.querySelector(".filter-condition");
+  first.parentNode.insertBefore(first.cloneNode(true), this);
+});
+</script>
+<form method="post" action="/cases/{{ case_id }}/filter/save">
+  <input name="name" placeholder="フィルタ名">
+  <label><input type="checkbox" name="overwrite" value="1"> 上書き</label>
+  <button>保存</button>
+</form>
+<form method="post" action="/cases/{{ case_id }}/filter/load">
+  <select name="name">
+    {% for n in named %}<option>{{ n }}</option>{% endfor %}
+  </select>
+  <button>呼び出し</button>
+</form>
+
+<h2>一覧</h2>
+<table>
+  <tr>
+    <th>行ID</th><th>元ファイル名</th><th>ファイル内行番号</th>
+    {% for f in log_fields %}<th>{{ f.identifier }}</th>{% endfor %}
+    {% for name in custom_names %}<th>{{ name }}</th>{% endfor %}
+  </tr>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row.row_id }}</td>
+      <td>{{ row.source_filename }}</td>
+      <td>{{ row.line_no }}</td>
+      {% for f in log_fields %}<td>{{ row[f.identifier] or "" }}</td>{% endfor %}
+      {% for name in custom_names %}
+        <td>
+          <form method="post" action="/cases/{{ case_id }}/cell">
+            <input type="hidden" name="row_id" value="{{ row.row_id }}">
+            <input type="hidden" name="name" value="{{ name }}">
+            <input name="value" value="{{ row[name] or "" }}">
+            <button>更新</button>
+          </form>
+        </td>
+      {% endfor %}
+    </tr>
+  {% endfor %}
+</table>
+{% if rows %}
+  <p><a href="/cases/{{ case_id }}/more?after={{ rows[-1].row_id }}">続き</a></p>
+{% endif %}
+
+<h2>一括入力</h2>
+<form method="post" action="/cases/{{ case_id }}/bulk">
+  <select name="name">{% for name in custom_names %}<option>{{ name }}</option>{% endfor %}</select>
+  <input name="value">
+  <input type="hidden" name="confirm" value="1">
+  <button onclick="return confirm('一括更新します。よろしいですか。')">一括実行</button>
+</form>
+
+<h2>集計</h2>
+<form method="post" action="/cases/{{ case_id }}/aggregate">
+  <label>グループ
+    <select name="group" multiple>
+      {% for f in log_fields %}<option value="log:{{ f.identifier }}">{{ f.identifier }}</option>{% endfor %}
+      {% for name in custom_names %}<option value="custom:{{ name }}">{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label><input type="checkbox" name="use_bucket"> 時間バケット</label>
+  <input name="n" value="1" size="4">
+  <select name="unit">
+    <option value="second">秒</option>
+    <option value="minute">分</option>
+    <option value="hour">時間</option>
+  </select>
+  <select name="metric_id">
+    {% for f in log_fields if f.field_type == "number" %}
+      <option value="{{ f.identifier }}">{{ f.identifier }}</option>
+    {% endfor %}
+  </select>
+  <select name="metric_fn">
+    <option value="count">個数</option>
+    <option value="avg">平均</option>
+    <option value="sum">合計</option>
+  </select>
+  <button>集計実行</button>
+</form>
+{% if aggregate_rows %}
+  <table>
+    <tr>{% for k in aggregate_rows[0].keys() %}<th>{{ k }}</th>{% endfor %}</tr>
+    {% for row in aggregate_rows %}
+      <tr>{% for v in row.values() %}<td>{{ v }}</td>{% endfor %}</tr>
+    {% endfor %}
+  </table>
+{% endif %}
+
+<h2>CSV</h2>
+<form method="post" action="/cases/{{ case_id }}/export/rows"><button>一致した行を書き出す</button></form>
+{% if aggregate_rows %}
+  <form method="post" action="/cases/{{ case_id }}/export/aggregate"><button>集計結果を書き出す</button></form>
+{% endif %}
+{% endblock %}

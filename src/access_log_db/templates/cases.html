@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>案件</h1>
+<form method="post" action="/cases">
+  <label>案件名 <input name="name" required></label>
+  <label>LogFormat文字列 <textarea name="logformat" rows="3" cols="80" required></textarea></label>
+  <button type="submit">作成</button>
+</form>
+<table>
+  <tr>
+    <th>案件名</th><th>LogFormat先頭</th><th>ファイル数</th><th>行数</th><th>最終取り込み</th><th></th>
+  </tr>
+  {% for case in cases %}
+    {% if case.error %}
+      <tr><td colspan="6">読めないファイル: {{ case.error }}</td></tr>
+    {% else %}
+      <tr>
+        <td><a href="/cases/{{ case.id }}">{{ case.name }}</a></td>
+        <td>{{ case.logformat_head }}</td>
+        <td>{{ case.file_count }}</td>
+        <td>{{ case.row_count }}</td>
+        <td>{{ case.last_import or "" }}</td>
+        <td>
+          <form method="post" action="/cases/{{ case.id }}/rename">
+            <input name="name" value="{{ case.name }}">
+            <button>名称変更</button>
+          </form>
+          <form method="post" action="/cases/{{ case.id }}/delete">
+            <input type="hidden" name="confirm" value="1">
+            <button onclick="return confirm('{{ warn_delete }}')">削除</button>
+          </form>
+        </td>
+      </tr>
+    {% endif %}
+  {% endfor %}
+</table>
+{% endblock %}
