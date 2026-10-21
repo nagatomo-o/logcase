@@ -71,8 +71,46 @@ def test_invalid_operator_filter_is_rejected_without_bricking_work(tmp_path: Pat
 
     assert rv.status_code == 200
     assert "フィルタ".encode("utf-8") in rv.data
+    assert "フィルタ条件を解釈できません。".encode("utf-8") not in rv.data
     with client.session_transaction() as sess:
-        assert not sess.get("filters_by_case", {}).get(cid)
+        assert sess["filters_by_case"][cid] == []
+
+
+def test_filter_operator_options_follow_selected_field_type(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.get(f"/cases/{cid}")
+
+    assert b'data-ops="contains,not_contains,starts,not_starts,in,gte,lte"' in rv.data
+    assert b'data-ops="eq,ne,gt,ge,lt,le,unset"' in rv.data
+    assert b'data-ops="eq,before,on_or_after,after,on_or_before,unset"' in rv.data
+    assert b"rebuildOperators" in rv.data
+
+
+def test_invalid_after_on_existing_case_defaults_to_zero(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.get(f"/cases/{cid}?after=not-a-number")
+
+    assert rv.status_code == 200
+    assert b"X" in rv.data
+
+
+def test_invalid_after_on_missing_case_flashes_not_found(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+
+    rv = client.get(
+        f"/cases/{uuid.uuid4()}?after=not-a-number",
+        follow_redirects=True,
+    )
+
+    assert rv.status_code == 200
+    assert "指定した案件が見つかりません。".encode("utf-8") in rv.data
 
 
 def test_filters_are_isolated_by_case(tmp_path: Path):
@@ -138,3 +176,56 @@ def test_bulk_update_requires_server_confirmation(tmp_path: Path):
     )
     assert "更新しました。".encode("utf-8") in second.data
     assert b'value="updated"' in second.data
+
+
+def test_mutations_clear_case_aggregate_cache(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    cache = app.config["AGGREGATE_CACHE"]
+
+    cache[cid] = [{"stale": "import"}]
+    client.post(
+        f"/cases/{cid}/import",
+        data={
+            "files": (
+                io.BytesIO(
+                    b'127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] '
+                    b'"GET / HTTP/1.0" 200 1\n'
+                ),
+                "access_log",
+            )
+        },
+        content_type="multipart/form-data",
+    )
+    assert cid not in cache
+
+    cache[cid] = [{"stale": "custom-add"}]
+    client.post(f"/cases/{cid}/custom", data={"name": "note"})
+    assert cid not in cache
+
+    cache[cid] = [{"stale": "cell"}]
+    client.post(
+        f"/cases/{cid}/cell",
+        data={"row_id": "1", "name": "note", "value": "changed"},
+    )
+    assert cid not in cache
+
+    cache[cid] = [{"stale": "bulk"}]
+    client.post(
+        f"/cases/{cid}/bulk",
+        data={"name": "note", "value": "bulk", "confirm": "1"},
+    )
+    assert cid not in cache
+
+    cache[cid] = [{"stale": "custom-delete"}]
+    client.post(
+        f"/cases/{cid}/custom/delete",
+        data={"name": "note", "confirm": "1"},
+    )
+    assert cid not in cache
+
+    cache[cid] = [{"stale": "case-delete"}]
+    client.post(f"/cases/{cid}/delete", data={"confirm": "1"})
+    assert cid not in cache

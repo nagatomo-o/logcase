@@ -54,7 +54,17 @@ def _case_specs(case_id: str) -> list[dict]:
 
 
 def _session_conditions(case_id: str) -> list[Condition]:
-    return conditions_from_spec(_case_specs(case_id))
+    valid_specs = []
+    for item in _case_specs(case_id):
+        try:
+            if item["source"] not in {"log", "custom"} or not _valid_filter_op(
+                item["field_type"], item["op"]
+            ):
+                continue
+            valid_specs.append(item)
+        except (KeyError, TypeError):
+            continue
+    return conditions_from_spec(valid_specs)
 
 
 def _set_case_filters(case_id: str, spec: list[dict]) -> None:
@@ -113,6 +123,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
             return redirect(url_for("cases_view"))
         try:
             delete_case(root, case_id)
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
             flash(MSG["S_CSE_OK03"])
         except AppError as exc:
             flash(exc.message)
@@ -140,9 +151,14 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 conditions = _session_conditions(case_id)
                 match_count = count_rows(conn, conditions)
                 rows = fetch_rows(conn, conditions, after)
-            except (AppError, KeyError, ValueError) as exc:
+            except AppError as exc:
                 _set_case_filters(case_id, [])
-                flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+                flash(exc.message)
+                conditions = []
+                match_count = count_rows(conn, conditions)
+                rows = fetch_rows(conn, conditions, after)
+            except (KeyError, TypeError, ValueError):
+                _set_case_filters(case_id, [])
                 conditions = []
                 match_count = count_rows(conn, conditions)
                 rows = fetch_rows(conn, conditions, after)
@@ -166,9 +182,10 @@ def create_app(data_dir: Path | None = None) -> Flask:
     def _render_work(case_id: str):
         try:
             after = int(request.args.get("after") or 0)
-            context = _work_context(case_id, after)
         except (TypeError, ValueError):
-            context = _work_context(case_id)
+            after = 0
+        try:
+            context = _work_context(case_id, after)
         except AppError as exc:
             flash(exc.message)
             return redirect(url_for("cases_view"))
@@ -213,6 +230,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 else:
                     text = data.decode("utf-8", errors="replace")
                     result = import_file(conn, name, text.splitlines(keepends=True))
+                app.config["AGGREGATE_CACHE"].pop(case_id, None)
                 flash(
                     msg(
                         "I_WRK_INF01",
@@ -238,25 +256,24 @@ def create_app(data_dir: Path | None = None) -> Flask:
         operators = request.form.getlist("op")
         values = request.form.getlist("value")
         spec = []
-        try:
-            for encoded, operator, value in zip(identifiers, operators, values):
+        for encoded, operator, value in zip(identifiers, operators, values):
+            try:
                 source, field_type, identifier = encoded.split(":", 2)
-                if source not in {"log", "custom"} or not _valid_filter_op(
-                    field_type, operator
-                ):
-                    raise ValueError
-                spec.append(
-                    {
-                        "identifier": identifier,
-                        "source": source,
-                        "field_type": field_type,
-                        "op": operator,
-                        "value": value.split(",") if operator == "in" else value,
-                    }
-                )
-        except ValueError:
-            flash(MSG["E_WRK_FMT05"])
-            return redirect(url_for("work_view", case_id=case_id))
+            except ValueError:
+                continue
+            if source not in {"log", "custom"} or not _valid_filter_op(
+                field_type, operator
+            ):
+                continue
+            spec.append(
+                {
+                    "identifier": identifier,
+                    "source": source,
+                    "field_type": field_type,
+                    "op": operator,
+                    "value": value.split(",") if operator == "in" else value,
+                }
+            )
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -264,8 +281,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
             return redirect(url_for("cases_view"))
         try:
             count_rows(conn, conditions_from_spec(spec))
-        except (AppError, KeyError, ValueError) as exc:
-            flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+        except AppError as exc:
+            flash(exc.message)
             return redirect(url_for("work_view", case_id=case_id))
         finally:
             conn.close()
@@ -306,8 +323,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
             count_rows(conn, conditions_from_spec(spec))
             _set_case_filters(case_id, spec)
             app.config["AGGREGATE_CACHE"].pop(case_id, None)
-        except (AppError, KeyError, ValueError) as exc:
-            flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+        except AppError as exc:
+            flash(exc.message)
+        except (KeyError, TypeError, ValueError):
+            _set_case_filters(case_id, [])
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
         finally:
             conn.close()
         return redirect(url_for("work_view", case_id=case_id))
@@ -321,6 +341,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
             return redirect(url_for("cases_view"))
         try:
             add_custom_field(conn, request.form.get("name", ""))
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
         except AppError as exc:
             flash(exc.message)
         finally:
@@ -339,6 +360,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
             return redirect(url_for("cases_view"))
         try:
             delete_custom_field(conn, request.form.get("name", ""))
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
         except AppError as exc:
             flash(exc.message)
         finally:
@@ -359,6 +381,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 request.form["name"],
                 request.form.get("value", ""),
             )
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
         except (AppError, KeyError, ValueError) as exc:
             flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT02"])
         finally:
@@ -384,8 +407,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
                     "warning": warning,
                 }
                 return render_template("work.html", **context)
-            except (AppError, KeyError, ValueError) as exc:
-                flash(exc.message if isinstance(exc, AppError) else MSG["E_WRK_FMT05"])
+            except AppError as exc:
+                flash(exc.message)
+                return redirect(url_for("work_view", case_id=case_id))
+            except (KeyError, TypeError, ValueError):
+                _set_case_filters(case_id, [])
                 return redirect(url_for("work_view", case_id=case_id))
             finally:
                 conn.close()
@@ -396,6 +422,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 request.form.get("value", ""),
                 _session_conditions(case_id),
             )
+            app.config["AGGREGATE_CACHE"].pop(case_id, None)
             flash(MSG["S_WRK_OK01"])
         except AppError as exc:
             flash(exc.message)

@@ -42,8 +42,13 @@
 <form method="post" action="/cases/{{ case_id }}/filter">
   <div class="filter-condition">
     <select name="identifier">
-      {% for f in log_fields %}<option value="log:{{ f.field_type }}:{{ f.identifier }}">{{ f.identifier }}</option>{% endfor %}
-      {% for name in custom_names %}<option value="custom:string:{{ name }}">{{ name }}</option>{% endfor %}
+      {% for f in log_fields %}
+        <option value="log:{{ f.field_type }}:{{ f.identifier }}"
+          {% if f.field_type == "string" %}data-ops="contains,not_contains,starts,not_starts,in,gte,lte"
+          {% elif f.field_type == "number" %}data-ops="eq,ne,gt,ge,lt,le,unset"
+          {% else %}data-ops="eq,before,on_or_after,after,on_or_before,unset"{% endif %}>{{ f.identifier }}</option>
+      {% endfor %}
+      {% for name in custom_names %}<option value="custom:string:{{ name }}" data-ops="contains,not_contains,starts,not_starts,in,gte,lte">{{ name }}</option>{% endfor %}
     </select>
     <select name="op">
       <option value="contains">含む</option>
@@ -72,9 +77,38 @@
   <button name="clear" value="1">解除</button>
 </form>
 <script>
+const operatorLabels = {
+  contains: "含む", not_contains: "含まない", starts: "始まる",
+  not_starts: "始まらない", in: "複数選択", gte: "以上", lte: "以下",
+  unset: "未設定", eq: "等しい", ne: "等しくない", gt: "より大きい",
+  ge: "以上(数値)", lt: "より小さい", le: "以下(数値)",
+  before: "より前", on_or_after: "以降", after: "より後",
+  on_or_before: "以前"
+};
+function rebuildOperators(condition) {
+  const identifier = condition.querySelector('select[name="identifier"]');
+  const operator = condition.querySelector('select[name="op"]');
+  const ops = identifier.options[identifier.selectedIndex].dataset.ops.split(",");
+  operator.replaceChildren(...ops.map(function (op) {
+    const option = document.createElement("option");
+    option.value = op;
+    option.textContent = operatorLabels[op];
+    return option;
+  }));
+}
+function bindFilterCondition(condition) {
+  const identifier = condition.querySelector('select[name="identifier"]');
+  identifier.addEventListener("change", function () {
+    rebuildOperators(condition);
+  });
+  rebuildOperators(condition);
+}
+document.querySelectorAll(".filter-condition").forEach(bindFilterCondition);
 document.getElementById("add-filter").addEventListener("click", function () {
   const first = document.querySelector(".filter-condition");
-  first.parentNode.insertBefore(first.cloneNode(true), this);
+  const added = first.cloneNode(true);
+  first.parentNode.insertBefore(added, this);
+  bindFilterCondition(added);
 });
 </script>
 <form method="post" action="/cases/{{ case_id }}/filter/save">
