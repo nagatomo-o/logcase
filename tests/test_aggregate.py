@@ -250,3 +250,28 @@ def test_bucket_errors(tmp_path: Path):
         aggregate(conn, [], [], bucket=(1.5, "second"), metrics=[])
     assert fractional.value.code == "E_WRK_RNG01"
     conn.close()
+
+
+def test_colliding_row_id_custom_keeps_bucket_count(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "10/Oct/2024:12:10:00 +0900", "10"),
+            _line("/b", "10/Oct/2024:13:10:00 +0900", "5"),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO custom_fields (name, display_order) VALUES ('row_id', 0)"
+    )
+    conn.executemany(
+        """INSERT INTO custom_values (row_id, name, is_unset, str_value)
+           VALUES (?, 'row_id', 0, ?)""",
+        [(1, "not-an-id"), (2, "also-not")],
+    )
+    conn.commit()
+    rows = aggregate(conn, [], [], bucket=(1, "hour"), metrics=[])
+    assert sum(r["access_count"] for r in rows) == 2
+    conn.close()

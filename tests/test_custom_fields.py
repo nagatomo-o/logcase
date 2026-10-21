@@ -43,3 +43,12 @@ def test_add_and_bulk(tmp_path: Path):
     rows = fetch_rows(conn, [], 0)
     assert rows[1]["機能名"] == "単独"
     conn.close()
+
+
+def test_row_id_is_reserved(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    with pytest.raises(AppError) as ei:
+        add_custom_field(conn, "row_id")
+    assert ei.value.code == "E_WRK_DUP02"
+    conn.close()

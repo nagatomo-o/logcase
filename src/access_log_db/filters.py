@@ -146,11 +146,7 @@ def fetch_rows(
     ]
     out: list[dict] = []
     for row in rows:
-        item: dict = {
-            "row_id": row["row_id"],
-            "source_filename": row["source_filename"],
-            "line_no": row["line_no"],
-        }
+        item: dict = {}
         values = {
             v["identifier"]: v
             for v in conn.execute(
@@ -182,5 +178,8 @@ def fetch_rows(
                 item[name] = None
             else:
                 item[name] = val["str_value"]
+        item["row_id"] = row["row_id"]
+        item["source_filename"] = row["source_filename"]
+        item["line_no"] = row["line_no"]
         out.append(item)
     return out

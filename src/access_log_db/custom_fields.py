@@ -13,6 +13,7 @@ def add_custom_field(conn: sqlite3.Connection, name: str) -> None:
     log_ids = {
         r[0] for r in conn.execute("SELECT identifier FROM log_fields")
     }
+    log_ids.update({"row_id", "source_filename", "line_no"})
     if name in log_ids:
         raise AppError("E_WRK_DUP02", MSG["E_WRK_DUP02"])
     exists = conn.execute(
