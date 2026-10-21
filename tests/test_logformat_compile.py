@@ -51,3 +51,9 @@ def test_bare_i_rejected():
     with pytest.raises(LogFormatError) as ei:
         compile_logformat("%i")
     assert ei.value.code == "E_CSE_FMT02"
+
+
+def test_invalid_regex_literal_raises_fmt02():
+    with pytest.raises(LogFormatError) as ei:
+        compile_logformat("(")
+    assert ei.value.code == "E_CSE_FMT02"

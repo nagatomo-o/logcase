@@ -111,5 +111,10 @@ def compile_logformat(text: str) -> CompiledFormat:
             )
         )
         pattern_src = pattern_src.replace(specifier, pat, 1)
-    compiled = re.compile(pattern_src, re.IGNORECASE)
+    try:
+        compiled = re.compile(pattern_src, re.IGNORECASE)
+    except re.error:
+        raise LogFormatError(
+            "E_CSE_FMT02", "LogFormatを解釈できません。指定子を確認してください。"
+        )
     return CompiledFormat(fields=fields, pattern=compiled)
