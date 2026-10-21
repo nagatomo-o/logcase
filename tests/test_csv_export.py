@@ -197,6 +197,33 @@ def test_aggregate_failure_leaves_no_file(tmp_path: Path):
     assert not out.exists()
 
 
+def test_custom_field_named_row_id_keeps_integer_first_column(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(conn, "access_log", [LINE])
+    try:
+        add_custom_field(conn, "行ID")
+    except AppError:
+        order = conn.execute(
+            "SELECT COALESCE(MAX(display_order), -1) + 1 FROM custom_fields"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO custom_fields (name, display_order) VALUES ('行ID', ?)",
+            (order,),
+        )
+        conn.commit()
+    set_custom_value(conn, 1, "行ID", "not-the-row-id")
+    rows = list(
+        csv.reader(io.StringIO(rows_csv_bytes(conn, []).decode("utf-8-sig")))
+    )
+    assert rows[1][0] == "1"
+    assert rows[1][1] == "access_log"
+    assert rows[1][2] == "1"
+    assert rows[0][-1] == "行ID"
+    assert rows[1][-1] == "not-the-row-id"
+    conn.close()
+
+
 def test_csv_bytes_bom_crlf(tmp_path: Path):
     cid = create_case(tmp_path, "t", COMMON)
     conn = open_case(tmp_path, cid)

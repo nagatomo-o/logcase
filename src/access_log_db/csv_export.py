@@ -27,17 +27,15 @@ def _headers(conn: sqlite3.Connection) -> list[str]:
 
 
 def _row_values(row: dict, headers: list[str]) -> list[object]:
-    mapping = {
-        "行ID": row["row_id"],
-        "元ファイル名": row["source_filename"],
-        "ファイル内行番号": row["line_no"],
-    }
-    mapping.update(row)
-    out = []
-    for header in headers:
-        val = mapping.get(header)
-        out.append("" if val is None else val)
-    return out
+    values: list[object] = [
+        row["row_id"],
+        row["source_filename"],
+        row["line_no"],
+    ]
+    for header in headers[len(ROW_FIXED) :]:
+        val = row.get(header)
+        values.append("" if val is None else val)
+    return values
 
 
 def write_rows_csv(
