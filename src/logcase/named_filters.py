@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition
-from access_log_db.messages import MSG
-from access_log_db.names import validate_name
+from logcase.errors import AppError
+from logcase.filters import Condition
+from logcase.messages import MSG
+from logcase.names import validate_name
 
 
 def save_named_filter(

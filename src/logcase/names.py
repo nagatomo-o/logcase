@@ -1,5 +1,5 @@
-from access_log_db.errors import AppError
-from access_log_db.messages import MSG
+from logcase.errors import AppError
+from logcase.messages import MSG
 
 
 def validate_name(text: str, empty_code: str, length_code: str) -> str:

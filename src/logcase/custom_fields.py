@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition, _where
-from access_log_db.messages import MSG
-from access_log_db.names import validate_name
+from logcase.errors import AppError
+from logcase.filters import Condition, _where
+from logcase.messages import MSG
+from logcase.names import validate_name
 
 
 def add_custom_field(conn: sqlite3.Connection, name: str) -> None:

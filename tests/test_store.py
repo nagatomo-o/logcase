@@ -3,8 +3,8 @@ from pathlib import Path
 from uuid import uuid1, uuid4
 
 import pytest
-from access_log_db.errors import AppError
-from access_log_db.store import create_case, list_cases, open_case, rename_case, delete_case
+from logcase.errors import AppError
+from logcase.store import create_case, list_cases, open_case, rename_case, delete_case
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 

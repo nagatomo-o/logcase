@@ -2,8 +2,8 @@ import io
 import uuid
 from pathlib import Path
 
-from access_log_db.app import create_app
-from access_log_db.store import open_case
+from logcase.app import create_app
+from logcase.store import open_case
 
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
@@ -593,7 +593,7 @@ def test_second_work_get_skips_count_sql(tmp_path: Path):
         inner.set_trace_callback(seen.append)
         return inner
 
-    import access_log_db.app as appmod
+    import logcase.app as appmod
     original = appmod.open_case
     appmod.open_case = _wrap_open
     try:
@@ -617,7 +617,7 @@ def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
     client.get(f"/cases/{cid}?tab=list")
     seen: list[str] = []
 
-    import access_log_db.app as appmod
+    import logcase.app as appmod
     original = appmod.open_case
 
     def _wrap_open(data_dir, case_id):

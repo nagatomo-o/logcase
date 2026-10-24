@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
-from access_log_db.errors import LogFormatError
+from logcase.errors import LogFormatError
 
 SPECIFIER_RE = re.compile(r"%(?:\{([^}]+)\}|>)?([A-Za-z])")
 

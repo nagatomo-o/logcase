@@ -1,12 +1,12 @@
 from datetime import datetime, timedelta
 from pathlib import Path
 import pytest
-from access_log_db.store import create_case, open_case
-from access_log_db.custom_fields import add_custom_field, set_custom_value
-from access_log_db.import_log import import_file
-from access_log_db.aggregate import Metric, _bucket_start, aggregate
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition
+from logcase.store import create_case, open_case
+from logcase.custom_fields import add_custom_field, set_custom_value
+from logcase.import_log import import_file
+from logcase.aggregate import Metric, _bucket_start, aggregate
+from logcase.errors import AppError
+from logcase.filters import Condition
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 
@@ -207,7 +207,7 @@ def test_elapsed_time_buckets_cross_calendar_units():
 
 
 def test_keyset_pages_and_negative_offset(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr("access_log_db.aggregate._PAGE", 1)
+    monkeypatch.setattr("logcase.aggregate._PAGE", 1)
     cid = create_case(tmp_path, "t", COMMON)
     conn = open_case(tmp_path, cid)
     import_file(

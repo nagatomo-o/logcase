@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from access_log_db.errors import AppError
-from access_log_db.messages import MSG
+from logcase.errors import AppError
+from logcase.messages import MSG
 
 PAGE_SIZE = 100
 

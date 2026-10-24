@@ -1,6 +1,6 @@
 import pytest
-from access_log_db.errors import LogFormatError
-from access_log_db.logformat import compile_logformat
+from logcase.errors import LogFormatError
+from logcase.logformat import compile_logformat
 
 
 def test_empty_raises_req02():

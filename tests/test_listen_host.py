@@ -1,4 +1,4 @@
-from access_log_db.app import listen_host
+from logcase.app import listen_host
 
 
 def test_listen_host_defaults_to_loopback(monkeypatch):

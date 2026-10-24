@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition, _where, count_rows, fetch_rows
-from access_log_db.messages import MSG
+from logcase.errors import AppError
+from logcase.filters import Condition, _where, count_rows, fetch_rows
+from logcase.messages import MSG
 
 _PAGE = 5000
 _UNITS = ("second", "minute", "hour")

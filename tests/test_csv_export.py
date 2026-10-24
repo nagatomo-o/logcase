@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from access_log_db.custom_fields import add_custom_field, set_custom_value
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition
-from access_log_db.import_log import import_file
-from access_log_db.messages import MSG
-from access_log_db.store import create_case, open_case
-from access_log_db.csv_export import (
+from logcase.custom_fields import add_custom_field, set_custom_value
+from logcase.errors import AppError
+from logcase.filters import Condition
+from logcase.import_log import import_file
+from logcase.messages import MSG
+from logcase.store import create_case, open_case
+from logcase.csv_export import (
     aggregate_csv_bytes,
     rows_csv_bytes,
     write_aggregate_csv,
@@ -174,7 +174,7 @@ def test_rows_failure_deletes_partial(tmp_path: Path, monkeypatch: pytest.Monkey
     def boom(*args, **kwargs):
         raise OSError("disk")
 
-    monkeypatch.setattr("access_log_db.csv_export.fetch_rows", boom)
+    monkeypatch.setattr("logcase.csv_export.fetch_rows", boom)
     with pytest.raises(AppError) as ei:
         write_rows_csv(conn, [], out)
     assert ei.value.code == "E_EXP_SYS01"

@@ -22,25 +22,25 @@ from flask import (
     url_for,
 )
 
-from access_log_db.aggregate import Metric, aggregate
-from access_log_db.csv_export import aggregate_csv_bytes, rows_csv_bytes
-from access_log_db.custom_fields import (
+from logcase.aggregate import Metric, aggregate
+from logcase.csv_export import aggregate_csv_bytes, rows_csv_bytes
+from logcase.custom_fields import (
     add_custom_field,
     bulk_set_custom,
     delete_custom_field,
     set_custom_value,
 )
-from access_log_db.errors import AppError, LogFormatError
-from access_log_db.filters import Condition, count_rows, fetch_rows
-from access_log_db.import_log import delete_imported_file, import_file, import_gzip_bytes
-from access_log_db.logformat import compile_logformat, parse_line
-from access_log_db.messages import MSG, msg
-from access_log_db.named_filters import (
+from logcase.errors import AppError, LogFormatError
+from logcase.filters import Condition, count_rows, fetch_rows
+from logcase.import_log import delete_imported_file, import_file, import_gzip_bytes
+from logcase.logformat import compile_logformat, parse_line
+from logcase.messages import MSG, msg
+from logcase.named_filters import (
     conditions_from_spec,
     load_named_filter,
     save_named_filter,
 )
-from access_log_db.store import (
+from logcase.store import (
     create_case,
     delete_case,
     list_cases,

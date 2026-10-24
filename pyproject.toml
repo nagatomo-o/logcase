@@ -3,8 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "access-log-db"
+name = "logcase"
 version = "0.1.0"
+description = "案件ごとに Apache アクセスログを取り込み、絞り込んで集計する手元の調査ツール"
 requires-python = ">=3.12"
 dependencies = ["flask>=3.0"]
 
@@ -12,13 +13,13 @@ dependencies = ["flask>=3.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-access-log-db = "access_log_db.app:main"
+logcase = "logcase.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-access_log_db = ["templates/*.html", "templates/partials/*.html", "static/*"]
+logcase = ["templates/*.html", "templates/partials/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

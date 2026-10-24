@@ -5,9 +5,9 @@ import io
 import sqlite3
 from pathlib import Path
 
-from access_log_db.errors import AppError
-from access_log_db.filters import Condition, count_rows, fetch_rows
-from access_log_db.messages import MSG
+from logcase.errors import AppError
+from logcase.filters import Condition, count_rows, fetch_rows
+from logcase.messages import MSG
 
 ROW_FIXED = ["行ID", "元ファイル名", "ファイル内行番号"]
 

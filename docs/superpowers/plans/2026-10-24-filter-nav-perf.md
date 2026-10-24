@@ -21,12 +21,12 @@
 ## File Structure
 
 ```
-src/access_log_db/filters.py          # 文字列完全一致を IN 副問い合わせへ
+src/logcase/filters.py          # 文字列完全一致を IN 副問い合わせへ
 tests/test_filters.py                 # Time+Method、after の TZ、ne 未設定
-src/access_log_db/store.py            # PRAGMA・式索引・ANALYZE
+src/logcase/store.py            # PRAGMA・式索引・ANALYZE
 tests/test_store.py                   # 索引が無い DB を open すると作られる
-src/access_log_db/app.py              # 件数キャッシュ、非一覧は行を取らない
-src/access_log_db/csv_export.py       # match_count があれば COUNT 省略
+src/logcase/app.py              # 件数キャッシュ、非一覧は行を取らない
+src/logcase/csv_export.py       # match_count があれば COUNT 省略
 tests/test_app.py                     # 2度目 COUNT なし、ingest で一覧 SELECT なし
 docs/方式設計/A07-可用性・性能・運用監視.md
 ```
@@ -36,7 +36,7 @@ docs/方式設計/A07-可用性・性能・運用監視.md
 ### Task 1: 文字列完全一致の SQL を IN 副問い合わせにする
 
 **Files:**
-- Modify: `src/access_log_db/filters.py`
+- Modify: `src/logcase/filters.py`
 - Test: `tests/test_filters.py`
 
 **Interfaces:**
@@ -45,7 +45,7 @@ docs/方式設計/A07-可用性・性能・運用監視.md
 
 - [ ] **Step 1: Write the failing tests**
 
-`tests/test_filters.py` の末尾に追加する。既存 `test_string_ne_keeps_unset_custom_values` は残す。import を `from access_log_db.filters import Condition, count_rows, fetch_rows, _one` にする。
+`tests/test_filters.py` の末尾に追加する。既存 `test_string_ne_keeps_unset_custom_values` は残す。import を `from logcase.filters import Condition, count_rows, fetch_rows, _one` にする。
 
 ```python
 def test_datetime_after_excludes_exact_wall_second(tmp_path: Path):
@@ -100,7 +100,7 @@ Expected: `test_string_eq_sql_uses_in_subquery` が FAIL（いまは `EXISTS`）
 
 - [ ] **Step 3: Write minimal implementation**
 
-`src/access_log_db/filters.py` の `_one` で、数値分岐のあと・`contains` の前にある `eq` / `ne` / `in` / `not_in` を次に置き換える。日時分岐と数値分岐と含む系統は動かさない。`exists` 変数は含む系統が使うので残す。
+`src/logcase/filters.py` の `_one` で、数値分岐のあと・`contains` の前にある `eq` / `ne` / `in` / `not_in` を次に置き換える。日時分岐と数値分岐と含む系統は動かさない。`exists` 変数は含む系統が使うので残す。
 
 ```python
     if cond.field_type == "string" and cond.op in {"eq", "ne", "in", "not_in"}:
@@ -133,7 +133,7 @@ Expected: `test_string_eq_sql_uses_in_subquery` が FAIL（いまは `EXISTS`）
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -c "from access_log_db.filters import Condition, _one; print(_one(Condition('Request-Method','log','string','eq','POST')))"`
+Run: `python -c "from logcase.filters import Condition, _one; print(_one(Condition('Request-Method','log','string','eq','POST')))"`
 
 Expected: `row_id IN (SELECT` と `log_values`。`EXISTS` は含まれない。
 
@@ -150,7 +150,7 @@ Expected: PASS（新規 2 件と既存の `ne` 未設定・`eq`・`not_in`・`co
 ### Task 2: 接続時 PRAGMA と Time 式索引
 
 **Files:**
-- Modify: `src/access_log_db/store.py`
+- Modify: `src/logcase/store.py`
 - Test: `tests/test_store.py`
 
 **Interfaces:**
@@ -185,7 +185,7 @@ Expected: FAIL（DROP した索引が戻らない）。SCHEMA に既に同名索
 
 - [ ] **Step 3: Write minimal implementation**
 
-`src/access_log_db/store.py` の `SCHEMA` で `CREATE INDEX idx_log_values_num` の直後へ次を足す。
+`src/logcase/store.py` の `SCHEMA` で `CREATE INDEX idx_log_values_num` の直後へ次を足す。
 
 ```sql
 CREATE INDEX idx_log_rows_time_wall ON log_rows(substr(time_abs, 1, 19));
@@ -240,8 +240,8 @@ Expected: PASS。
 ### Task 3: 件数キャッシュ・非一覧は行を取らない・Export の COUNT 省略・文書
 
 **Files:**
-- Modify: `src/access_log_db/app.py`
-- Modify: `src/access_log_db/csv_export.py`
+- Modify: `src/logcase/app.py`
+- Modify: `src/logcase/csv_export.py`
 - Modify: `tests/test_app.py`
 - Modify: `tests/test_csv_export.py`（署名変更の回帰だけ。新テストは任意）
 - Modify: `docs/方式設計/A07-可用性・性能・運用監視.md`
@@ -281,7 +281,7 @@ def test_second_work_get_skips_count_sql(tmp_path: Path):
         inner.set_trace_callback(seen.append)
         return inner
 
-    import access_log_db.app as appmod
+    import logcase.app as appmod
     original = appmod.open_case
     appmod.open_case = _wrap_open
     try:
@@ -305,7 +305,7 @@ def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
     client.get(f"/cases/{cid}?tab=list")
     seen: list[str] = []
 
-    import access_log_db.app as appmod
+    import logcase.app as appmod
     original = appmod.open_case
 
     def _wrap_open(data_dir, case_id):
@@ -327,7 +327,7 @@ def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
     assert page == []
 ```
 
-`test_second_work_get_skips_count_sql` は、パッチ対象が `app.py` の `from access_log_db.store import open_case` 束縛なら `access_log_db.app.open_case` を差し替える。`create_app` クロージャが `open_case` をグローバル参照するので、この差し替えで `_work_context` の接続にトレースが付く。
+`test_second_work_get_skips_count_sql` は、パッチ対象が `app.py` の `from logcase.store import open_case` 束縛なら `logcase.app.open_case` を差し替える。`create_app` クロージャが `open_case` をグローバル参照するので、この差し替えで `_work_context` の接続にトレースが付く。
 
 実装前は 2 度目の GET でも `COUNT(*)` とフィルタ付き COUNT が走るので FAIL。
 
@@ -339,7 +339,7 @@ Expected: FAIL（COUNT または `ORDER BY r.row_id` が残る）。
 
 - [ ] **Step 3: Write minimal implementation**
 
-`src/access_log_db/csv_export.py` の `rows_csv_bytes` を次にする。`write_rows_csv` は変えない。
+`src/logcase/csv_export.py` の `rows_csv_bytes` を次にする。`write_rows_csv` は変えない。
 
 ```python
 def rows_csv_bytes(
@@ -365,7 +365,7 @@ def rows_csv_bytes(
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 ```
 
-`src/access_log_db/app.py` に件数キャッシュを足す。`json` は既存 import。
+`src/logcase/app.py` に件数キャッシュを足す。`json` は既存 import。
 
 ```python
 def _filter_cache_key(case_id: str) -> str:

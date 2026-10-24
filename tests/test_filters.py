@@ -1,8 +1,8 @@
 from pathlib import Path
-from access_log_db.custom_fields import add_custom_field, set_custom_value
-from access_log_db.store import create_case, open_case
-from access_log_db.import_log import import_file
-from access_log_db.filters import Condition, count_rows, fetch_rows, _one
+from logcase.custom_fields import add_custom_field, set_custom_value
+from logcase.store import create_case, open_case
+from logcase.import_log import import_file
+from logcase.filters import Condition, count_rows, fetch_rows, _one
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 

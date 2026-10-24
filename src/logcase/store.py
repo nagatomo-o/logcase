@@ -5,10 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from access_log_db.errors import AppError
-from access_log_db.logformat import compile_logformat
-from access_log_db.messages import MSG
-from access_log_db.names import validate_name
+from logcase.errors import AppError
+from logcase.logformat import compile_logformat
+from logcase.messages import MSG
+from logcase.names import validate_name
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;

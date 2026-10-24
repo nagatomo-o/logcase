@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from access_log_db.errors import LogFormatError
-from access_log_db.store import create_case, open_case
-from access_log_db.import_log import import_file, import_gzip_bytes
+from logcase.errors import LogFormatError
+from logcase.store import create_case, open_case
+from logcase.import_log import import_file, import_gzip_bytes
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 LINE = '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /index HTTP/1.1" 200 1234\n'
@@ -116,8 +116,8 @@ def test_gzip(tmp_path: Path):
     conn.close()
 
 
-from access_log_db.custom_fields import add_custom_field, set_custom_value
-from access_log_db.import_log import delete_imported_file
+from logcase.custom_fields import add_custom_field, set_custom_value
+from logcase.import_log import delete_imported_file
 
 
 LINE_B = '10.0.0.1 - - [10/Oct/2024:13:00:00 +0900] "GET /other HTTP/1.1" 404 9\n'

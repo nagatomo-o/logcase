@@ -1,4 +1,4 @@
-from access_log_db import HEALTH
+from logcase import HEALTH
 
 
 def test_health_constant():

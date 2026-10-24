@@ -1,14 +1,14 @@
 from pathlib import Path
 import pytest
-from access_log_db.errors import AppError
-from access_log_db.store import create_case, open_case
-from access_log_db.custom_fields import (
+from logcase.errors import AppError
+from logcase.store import create_case, open_case
+from logcase.custom_fields import (
     add_custom_field,
     set_custom_value,
     bulk_set_custom,
 )
-from access_log_db.import_log import import_file
-from access_log_db.filters import Condition, fetch_rows
+from logcase.import_log import import_file
+from logcase.filters import Condition, fetch_rows
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 LINE = '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET {path} HTTP/1.1" 200 1\n'

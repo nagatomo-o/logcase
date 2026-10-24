@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir --root-user-action=ignore "flask>=3.0"
 
 EXPOSE 8765
 
-CMD ["python", "-m", "access_log_db.app"]
+CMD ["python", "-m", "logcase.app"]

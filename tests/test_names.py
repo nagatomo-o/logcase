@@ -1,6 +1,6 @@
 import pytest
-from access_log_db.errors import AppError
-from access_log_db.names import validate_name
+from logcase.errors import AppError
+from logcase.names import validate_name
 
 
 def test_trims_and_accepts():

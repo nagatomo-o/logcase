@@ -1,8 +1,8 @@
 from pathlib import Path
 import pytest
-from access_log_db.errors import AppError
-from access_log_db.store import create_case, open_case
-from access_log_db.named_filters import (
+from logcase.errors import AppError
+from logcase.store import create_case, open_case
+from logcase.named_filters import (
     save_named_filter,
     load_named_filter,
     list_named_filters,

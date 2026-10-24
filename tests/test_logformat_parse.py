@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from access_log_db.logformat import compile_logformat, parse_line
+from logcase.logformat import compile_logformat, parse_line
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 
@@ -77,7 +77,7 @@ def test_split_request_empty_query_is_empty_string():
 
 
 def test_split_request_http09_protocol_unset():
-    from access_log_db.logformat import split_request
+    from logcase.logformat import split_request
 
     values = {v.identifier: v for v in split_request("GET /index")}
     assert values["Request-Method"].str_value == "GET"
@@ -88,7 +88,7 @@ def test_split_request_http09_protocol_unset():
 
 
 def test_split_request_absolute_url():
-    from access_log_db.logformat import split_request
+    from logcase.logformat import split_request
 
     values = {v.identifier: v for v in split_request("GET http://host/foo?x=1 HTTP/1.1")}
     assert values["Request-Method"].str_value == "GET"
@@ -98,7 +98,7 @@ def test_split_request_absolute_url():
 
 
 def test_derived_values_follow_request_in_order():
-    from access_log_db.logformat import REQUEST_DERIVED_IDS
+    from logcase.logformat import REQUEST_DERIVED_IDS
 
     c = compile_logformat(COMMON)
     line = '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /index HTTP/1.1" 200 1'
@@ -112,7 +112,7 @@ def test_derived_values_follow_request_in_order():
 
 
 def test_split_request_dash_all_unset():
-    from access_log_db.logformat import split_request
+    from logcase.logformat import split_request
 
     values = split_request("-")
     assert [v.identifier for v in values] == [
