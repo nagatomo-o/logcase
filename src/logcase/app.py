@@ -40,6 +40,7 @@ from logcase.named_filters import (
     load_named_filter,
     save_named_filter,
 )
+from logcase.duckdb_store import convert_all_cases, use_duckdb
 from logcase.store import (
     create_case,
     delete_case,
@@ -830,6 +831,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_dir = Path.cwd() / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    if use_duckdb():
+        convert_all_cases(data_dir)
     app = create_app(data_dir)
     host = listen_host()
     try:

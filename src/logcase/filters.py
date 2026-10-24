@@ -49,6 +49,35 @@ def _where(conditions: list[Condition]) -> tuple[str, list[Any]]:
     return " AND ".join(clauses), params
 
 
+def _prefix_bound(prefix: str) -> str | None:
+    """First string after every value that starts with prefix, or None if none."""
+    chars = list(prefix)
+    for index in range(len(chars) - 1, -1, -1):
+        code = ord(chars[index])
+        if code < 0x10FFFF:
+            chars[index] = chr(code + 1)
+            return "".join(chars[: index + 1])
+    return None
+
+
+def _value_table(cond: Condition) -> tuple[str, str, str]:
+    if cond.source == "custom":
+        return "custom_values", "name", "c"
+    return "log_values", "identifier", "v"
+
+
+def _in_str(
+    cond: Condition, pred: str, extra: list[Any], *, negate: bool = False
+) -> tuple[str, list[Any]]:
+    table, key_col, alias = _value_table(cond)
+    inner = (
+        f"SELECT {alias}.row_id FROM {table} {alias} "
+        f"WHERE {alias}.{key_col} = ? AND {pred}"
+    )
+    keyword = "NOT IN" if negate else "IN"
+    return f"r.row_id {keyword} ({inner})", [cond.identifier, *extra]
+
+
 def _one(cond: Condition) -> tuple[str, list[Any]]:
     if cond.field_type == "datetime":
         wall = "substr(r.time_abs, 1, 19)"
@@ -116,17 +145,29 @@ def _one(cond: Condition) -> tuple[str, list[Any]]:
         pred = f"{col_s} IS NOT NULL AND instr({col_s}, ?) = 0"
         return exists.format(pred=pred), [key, cond.value]
     if cond.op == "starts":
-        pred = f"{col_s} IS NOT NULL AND substr({col_s}, 1, length(?)) = ?"
-        return exists.format(pred=pred), [key, cond.value, cond.value]
+        prefix = "" if cond.value is None else str(cond.value)
+        if prefix == "":
+            return _in_str(cond, "str_value IS NOT NULL", [])
+        end = _prefix_bound(prefix)
+        if end is None:
+            return _in_str(cond, "str_value >= ?", [prefix])
+        return _in_str(cond, "str_value >= ? AND str_value < ?", [prefix, end])
     if cond.op == "not_starts":
-        pred = f"{col_s} IS NOT NULL AND substr({col_s}, 1, length(?)) != ?"
-        return exists.format(pred=pred), [key, cond.value, cond.value]
+        prefix = "" if cond.value is None else str(cond.value)
+        if prefix == "":
+            return "1=0", []
+        end = _prefix_bound(prefix)
+        if end is None:
+            return _in_str(cond, "str_value IS NOT NULL AND str_value < ?", [prefix])
+        return _in_str(
+            cond,
+            "str_value IS NOT NULL AND (str_value < ? OR str_value >= ?)",
+            [prefix, end],
+        )
     if cond.op == "gte":
-        pred = f"{col_s} IS NOT NULL AND {col_s} >= ?"
-        return exists.format(pred=pred), [key, cond.value]
+        return _in_str(cond, "str_value IS NOT NULL AND str_value >= ?", [cond.value])
     if cond.op == "lte":
-        pred = f"{col_s} IS NOT NULL AND {col_s} <= ?"
-        return exists.format(pred=pred), [key, cond.value]
+        return _in_str(cond, "str_value IS NOT NULL AND str_value <= ?", [cond.value])
     raise ValueError(f"unknown op {cond.op}")
 
 

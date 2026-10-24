@@ -7,5 +7,6 @@ services:
       - data:/app/data
     environment:
       ACCESS_LOG_BIND: "0.0.0.0"
+      LOGCASE_ENGINE: "duckdb"
 volumes:
   data:

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from logcase.duckdb_store import duckdb_path_for, open_or_convert, use_duckdb
 from logcase.errors import AppError
 from logcase.logformat import compile_logformat
 from logcase.messages import MSG
@@ -113,6 +114,11 @@ def open_case(data_dir: Path, case_id: str) -> sqlite3.Connection:
     path = case_path(data_dir, case_id)
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
+    if use_duckdb():
+        try:
+            return open_or_convert(path)
+        except Exception as exc:
+            print(f"DuckDB を開けないため SQLite に戻します: {exc}", flush=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     _prepare_conn(conn)
@@ -165,8 +171,14 @@ def list_cases(data_dir: Path) -> list[dict]:
             continue
         conn = None
         try:
-            conn = sqlite3.connect(path)
-            conn.row_factory = sqlite3.Row
+            duck_path = duckdb_path_for(path)
+            if use_duckdb() and duck_path.is_file():
+                from logcase.duckdb_store import open_duckdb_file
+
+                conn = open_duckdb_file(duck_path)
+            else:
+                conn = sqlite3.connect(path)
+                conn.row_factory = sqlite3.Row
             meta = conn.execute("SELECT name, logformat FROM meta").fetchone()
             if meta is None:
                 rows.append({"id": path.stem, "error": path.name})
@@ -210,3 +222,6 @@ def delete_case(data_dir: Path, case_id: str) -> None:
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     path.unlink()
+    extra = duckdb_path_for(path)
+    extra.unlink(missing_ok=True)
+    extra.with_name(extra.name + ".tmp").unlink(missing_ok=True)

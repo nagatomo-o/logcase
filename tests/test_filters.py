@@ -234,3 +234,22 @@ def test_string_eq_sql_uses_in_subquery():
     assert "row_id IN (SELECT" in sql
     assert "EXISTS" not in sql
     assert params == ["Request-Method", "POST"]
+
+
+def test_starts_request_path(tmp_path: Path):
+    conn = _conn(tmp_path)
+    conds = [Condition("Request-Path", "log", "string", "starts", "/in")]
+    assert count_rows(conn, conds) == 2
+    paths = {row["Request-Path"] for row in fetch_rows(conn, conds, after_row_id=0)}
+    assert paths == {"/index"}
+    none = [Condition("Request-Path", "log", "string", "not_starts", "/in")]
+    assert count_rows(conn, none) == 1
+    assert fetch_rows(conn, none, after_row_id=0)[0]["Request-Path"] == "/api"
+    conn.close()
+
+
+def test_starts_sql_uses_prefix_range():
+    sql, params = _one(Condition("Request-Path", "log", "string", "starts", "/admin"))
+    assert "row_id IN (SELECT" in sql
+    assert "substr(" not in sql
+    assert params == ["Request-Path", "/admin", "/admio"]

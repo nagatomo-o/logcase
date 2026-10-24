@@ -11,7 +11,7 @@ ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 ENV ACCESS_LOG_BIND=0.0.0.0
 
-RUN pip install --no-cache-dir --root-user-action=ignore "flask>=3.0"
+RUN pip install --no-cache-dir --root-user-action=ignore "flask>=3.0" "duckdb>=1.1"
 
 EXPOSE 8765
 
