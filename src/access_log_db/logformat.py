@@ -20,6 +20,13 @@ NAMED_PATTERNS = {
 }
 DEFAULT_NAMED_PATTERN = r'([^"]+|-)'
 
+REQUEST_DERIVED_IDS = (
+    "Request-Method",
+    "Request-Path",
+    "Request-Query",
+    "Request-Protocol",
+)
+
 # key -> (label, field_type, pattern or None, time_axis)
 FIELDS: dict[str, tuple[str, str, str | None, bool]] = {
     "a": ("RequestIP", "string", rf"({_IP})", False),
@@ -67,6 +74,7 @@ class FieldDef:
     order: int
     time_axis: bool
     key: str
+    derived: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,7 +83,7 @@ class CompiledFormat:
     pattern: re.Pattern[str]
 
 
-def compile_logformat(text: str) -> CompiledFormat:
+def compile_logformat(text: str, include_derived: bool = True) -> CompiledFormat:
     raw = text.strip()
     if not raw:
         raise LogFormatError("E_CSE_REQ02", "LogFormatを入力してください。")
@@ -110,9 +118,56 @@ def compile_logformat(text: str) -> CompiledFormat:
                 order=order,
                 time_axis=time_axis,
                 key=key,
+                derived=False,
             )
         )
         pattern_src = pattern_src.replace(specifier, pat, 1)
+    if include_derived and any(
+        f.key == "r"
+        and f.identifier == "Request"
+        and "{" not in f.specifier
+        and not f.derived
+        for f in fields
+    ):
+        for ident in REQUEST_DERIVED_IDS:
+            if ident in seen:
+                raise LogFormatError(
+                    "E_CSE_DUP01", "同じフィールド名が重複しているため登録できません。"
+                )
+            seen.add(ident)
+        expanded: list[FieldDef] = []
+        for field in fields:
+            expanded.append(field)
+            if (
+                field.key == "r"
+                and field.identifier == "Request"
+                and "{" not in field.specifier
+                and not field.derived
+            ):
+                for ident in REQUEST_DERIVED_IDS:
+                    expanded.append(
+                        FieldDef(
+                            identifier=ident,
+                            field_type="string",
+                            specifier="derived:%r",
+                            order=0,
+                            time_axis=False,
+                            key="derived",
+                            derived=True,
+                        )
+                    )
+        fields = [
+            FieldDef(
+                identifier=f.identifier,
+                field_type=f.field_type,
+                specifier=f.specifier,
+                order=i,
+                time_axis=f.time_axis,
+                key=f.key,
+                derived=f.derived,
+            )
+            for i, f in enumerate(expanded)
+        ]
     try:
         compiled = re.compile(pattern_src, re.IGNORECASE)
     except re.error:
@@ -141,18 +196,50 @@ class ParsedLine:
     time_offset: Optional[str]
 
 
+def _unset_derived() -> list[ParsedValue]:
+    return [ParsedValue(ident, True, None, None) for ident in REQUEST_DERIVED_IDS]
+
+
+def split_request(raw: str) -> list[ParsedValue]:
+    if raw == "-":
+        return _unset_derived()
+    parts = raw.split()
+    if not parts:
+        return _unset_derived()
+    method = parts[0]
+    rest = parts[1:]
+    protocol: str | None = None
+    if rest and rest[-1].startswith("HTTP/"):
+        protocol = rest[-1]
+        target = " ".join(rest[:-1])
+    else:
+        target = " ".join(rest)
+    if "?" in target:
+        path, query = target.split("?", 1)
+    else:
+        path, query = target, ""
+    method_id, path_id, query_id, protocol_id = REQUEST_DERIVED_IDS
+    return [
+        ParsedValue(method_id, False, method, None),
+        ParsedValue(path_id, False, path, None),
+        ParsedValue(query_id, False, query, None),
+        ParsedValue(protocol_id, protocol is None, protocol, None),
+    ]
+
+
 def parse_line(compiled: CompiledFormat, line: str) -> Optional[ParsedLine]:
     if line == "":
         return None
     escaped = line.replace('\\"', TEMP_QUOTE)
+    capture_fields = [f for f in compiled.fields if not f.derived]
     match = compiled.pattern.match(escaped)
-    if match is None or len(match.groups()) != len(compiled.fields):
+    if match is None or len(match.groups()) != len(capture_fields):
         return None
     values: list[ParsedValue] = []
     time_display = None
     time_abs = None
     time_offset = None
-    for i, field in enumerate(compiled.fields):
+    for i, field in enumerate(capture_fields):
         raw = match.group(i + 1)
         raw = raw.replace(TEMP_QUOTE, '"')
         if field.field_type == "number":
@@ -174,4 +261,11 @@ def parse_line(compiled: CompiledFormat, line: str) -> Optional[ParsedLine]:
             values.append(ParsedValue(field.identifier, time_abs is None, raw, None))
         else:
             values.append(ParsedValue(field.identifier, False, raw, None))
+    request = next((v for v in values if v.identifier == "Request"), None)
+    if request is not None and any(f.derived for f in compiled.fields):
+        derived_values = split_request(request.str_value or "")
+        insert_at = next(
+            i for i, v in enumerate(values) if v.identifier == "Request"
+        ) + 1
+        values[insert_at:insert_at] = derived_values
     return ParsedLine(values, time_display, time_abs, time_offset)
