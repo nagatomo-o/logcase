@@ -1,0 +1,11 @@
+.venv
+data
+__pycache__
+.pytest_cache
+*.pyc
+*.egg-info
+.git
+.superpowers
+docs
+tests
+.obsidian
