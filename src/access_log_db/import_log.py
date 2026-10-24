@@ -32,7 +32,12 @@ def import_file(
     conn: sqlite3.Connection, filename: str, lines: Iterable[str]
 ) -> ImportResult:
     logformat = conn.execute("SELECT logformat FROM meta").fetchone()[0]
-    compiled = compile_logformat(logformat)
+    field_rows = conn.execute(
+        "SELECT identifier, specifier FROM log_fields"
+    ).fetchall()
+    include_derived = any(row[1] == "derived:%r" for row in field_rows)
+    known_ids = {row[0] for row in field_rows}
+    compiled = compile_logformat(logformat, include_derived=include_derived)
     result = ImportResult(0, 0, 0, 0)
     try:
         conn.execute("BEGIN")
@@ -77,6 +82,8 @@ def import_file(
                 ),
             )
             for value in parsed.values:
+                if value.identifier not in known_ids:
+                    continue
                 field = next(f for f in compiled.fields if f.identifier == value.identifier)
                 if field.field_type == "datetime":
                     continue
@@ -117,6 +124,43 @@ def import_file(
         conn.rollback()
         raise AppError("E_WRK_SYS01", MSG["E_WRK_SYS01"]) from exc
     return result
+
+
+def delete_imported_file(conn: sqlite3.Connection, filename: str) -> int:
+    if not filename:
+        return 0
+    exists = conn.execute(
+        "SELECT 1 FROM import_files WHERE source_filename = ? "
+        "UNION ALL SELECT 1 FROM log_rows WHERE source_filename = ? LIMIT 1",
+        (filename, filename),
+    ).fetchone()
+    if not exists:
+        return 0
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            "DELETE FROM log_values WHERE row_id IN "
+            "(SELECT row_id FROM log_rows WHERE source_filename = ?)",
+            (filename,),
+        )
+        conn.execute(
+            "DELETE FROM custom_values WHERE row_id IN "
+            "(SELECT row_id FROM log_rows WHERE source_filename = ?)",
+            (filename,),
+        )
+        cur = conn.execute(
+            "DELETE FROM log_rows WHERE source_filename = ?",
+            (filename,),
+        )
+        conn.execute(
+            "DELETE FROM import_files WHERE source_filename = ?",
+            (filename,),
+        )
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        raise AppError("E_WRK_SYS01", MSG["E_WRK_SYS01"]) from exc
+    return cur.rowcount
 
 
 def import_gzip_bytes(
