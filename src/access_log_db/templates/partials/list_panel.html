@@ -1,0 +1,91 @@
+{% from "partials/icons.html" import icon %}
+{% from "partials/macros.html" import status_pill %}
+<div class="toolbar">
+  <div class="tl">
+    <span class="big">{{ match_count|comma }}</span>
+    <span class="small">行が一致</span>
+  </div>
+  {% if filter_specs %}
+    <span class="toolbar-sep"></span>
+    <div style="display:flex;gap:4px;align-items:center;max-width:470px;overflow:hidden">
+      {% for spec in filter_specs[:3] %}
+        <span class="chip static on" style="font-size:10.5px">
+          <span class="t">{{ spec.identifier }} {{ op_labels.get(spec.op, spec.op) }} {% if spec.op in ("in", "not_in") %}{{ spec.value_text.split(",")|length }}件{% else %}{{ spec.value_text }}{% endif %}</span>
+        </span>
+      {% endfor %}
+      {% if filter_specs|length > 3 %}
+        <span style="font-size:10.5px;color:var(--faint)">+{{ filter_specs|length - 3 }}</span>
+      {% endif %}
+    </div>
+  {% endif %}
+  <span class="sp"></span>
+  <form method="post" action="{{ url_for('export_rows', case_id=case_id) }}">
+    <input type="hidden" name="tab" value="list">
+    <button class="btn sm" {% if match_count == 0 %}disabled{% endif %}>{{ icon("download", 12) }}一致行を CSV に</button>
+  </form>
+</div>
+
+{% if total_row_count == 0 %}
+  <div class="empty-state">
+    <div class="big">まだログ行がありません</div>
+    <div class="sm">「取り込み」タブで access_log または .gz を選んでください。</div>
+    <a class="btn primary" href="{{ url_for('work_view', case_id=case_id, tab='ingest') }}">{{ icon("upload", 13) }}取り込みへ</a>
+  </div>
+{% else %}
+  <div class="tbl-wrap table-scroll">
+    <table class="data-tbl">
+      <tr>
+        <th class="sticky-id">行ID</th>
+        <th>元ファイル</th>
+        <th class="num">行番号</th>
+        {% for f in log_fields %}
+          <th>{{ f.identifier }}{% if f.time_axis %} <span class="tag axis" style="height:14px;font-size:8.5px;padding:0 3px">軸</span>{% endif %}</th>
+        {% endfor %}
+        {% for name in custom_names %}
+          <th>{{ name }} <span style="color:var(--accent);font-size:11px;opacity:0.75">✎</span></th>
+        {% endfor %}
+      </tr>
+      {% for row in rows %}
+        <tr>
+          <td class="sticky-id num">{{ row.row_id }}</td>
+          <td class="mono">{{ row.source_filename }}</td>
+          <td class="num">{{ row.line_no }}</td>
+          {% for f in log_fields %}
+            {% set v = row[f.identifier] %}
+            <td class="{% if f.field_type == 'number' %}num{% endif %} {% if f.identifier in ['Request', 'RemoteHost', 'User-Agent'] %}mono{% endif %}">
+              {% if v is none or v == "" %}
+                <span class="cell-empty">−</span>
+              {% elif f.identifier == "Status" %}
+                {{ status_pill(v) }}
+              {% elif f.identifier == "Request" %}
+                {% set parts = (v|string).split(" ", 1) %}
+                <span class="mth">{{ parts[0] }}</span>
+                <span class="clip" title="{{ v }}">{% if parts|length > 1 %}{{ parts[1] }}{% endif %}</span>
+              {% else %}
+                <span title="{{ v }}">{{ v }}</span>
+              {% endif %}
+            </td>
+          {% endfor %}
+          {% for name in custom_names %}
+            <td>
+              <form method="post" action="{{ url_for('work_cell', case_id=case_id) }}" class="cell-form">
+                <input type="hidden" name="tab" value="list">
+                <input type="hidden" name="row_id" value="{{ row.row_id }}">
+                <input type="hidden" name="name" value="{{ name }}">
+                <input class="cell-hit" name="value" value="{{ row[name] or "" }}" data-original="{{ row[name] or "" }}" placeholder="—" title="Enter またはフォーカスを外して更新">
+              </form>
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% if rows %}
+    <div class="list-foot">
+      <span class="lf-txt">{{ rows|length }} 行を表示</span>
+      <span class="lf-note">続きは直前の行IDより後を取ります（全件は一度に載せません）</span>
+      <span class="sp"></span>
+      <a class="list-more" href="{{ url_for('work_more', case_id=case_id, after=rows[-1].row_id, tab='list') }}">続き</a>
+    </div>
+  {% endif %}
+{% endif %}

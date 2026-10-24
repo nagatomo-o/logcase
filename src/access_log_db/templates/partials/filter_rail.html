@@ -1,0 +1,169 @@
+{% from "partials/icons.html" import icon %}
+{% from "partials/macros.html" import field_options, operator_options %}
+<aside class="rail">
+  <div class="rail-head">
+    <div class="rail-title">
+      {{ icon("filter", 13) }}
+      <h2>検索条件</h2>
+      <span style="margin-left:auto">
+        {% if not filter_specs %}
+          <span class="count-state all">全件</span>
+        {% else %}
+          <span class="count-state">{{ filter_specs|length }} 条件</span>
+        {% endif %}
+      </span>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('work_filter', case_id=case_id) }}" id="filter-form">
+    <input type="hidden" name="tab" value="list">
+    <div class="rail-body">
+      <div class="rail-sec" style="padding-bottom:11px">
+        <div class="count-box">
+          <span class="count-num">{{ match_count|comma }}</span>
+          <span class="count-den">/ {{ total_row_count|comma }} 行</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:7px">
+          <span style="font-size:10.5px;color:var(--faint)">一致した行</span>
+          <span style="margin-left:auto;font-size:10.5px;font-family:var(--mono);color:var(--sub)">
+            {% if filter_specs %}適用中{% else %}フィルタ未適用{% endif %}
+          </span>
+        </div>
+      </div>
+
+      <div class="rail-sec">
+        <div class="sec-label">
+          <span>条件（AND）</span>
+          <span class="r" id="cond-count">{{ filter_specs|length }} 件</span>
+        </div>
+        <div id="cond-empty" style="font-size:11.5px;color:var(--faint);padding:3px 0 10px;line-height:1.6"{% if filter_specs %} hidden{% endif %}>
+          条件なし = 全件が対象。<br>列・演算子・値を 1 行ずつ積みます。
+        </div>
+        <div class="cond-list" id="cond-list">
+          {% for spec in filter_specs %}
+            <div class="and-tag"{% if loop.first %} hidden{% endif %}>AND</div>
+            <div class="cond filter-condition">
+              <span class="cond-node">{{ loop.index }}</span>
+              <div class="cond-card">
+                <div class="cond-top">
+                  <div class="cond-field">
+                    <select class="mini-select" name="identifier" aria-label="列">
+                      {{ field_options(log_fields, custom_names, spec.encoded) }}
+                    </select>
+                  </div>
+                  <button type="button" class="icon-btn" data-remove-cond title="この条件を削除" aria-label="この条件を削除">{{ icon("close", 12) }}</button>
+                </div>
+                <div class="cond-op">
+                  <select class="mini-select" name="op" style="width:118px;flex:none" aria-label="演算子">
+                    {{ operator_options(spec.op) }}
+                  </select>
+                  <div class="cond-val">
+                    <input class="mini-input" name="value" value="{{ spec.value_text }}" placeholder="値">
+                  </div>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="add-cond" id="add-filter">{{ icon("plus", 12) }}条件を追加</button>
+      </div>
+
+      <div class="rail-sec">
+        <div class="sec-label"><span>この条件の意味</span></div>
+        <div class="summary-box" id="cond-summary">
+          {% if not filter_specs %}
+            <span style="color:var(--faint)">全件（絞り込みなし）</span>
+          {% else %}
+            {% for spec in filter_specs %}
+              <div>
+                {% if not loop.first %}<span class="k">　AND </span>{% endif %}
+                {% if spec.op == "unset" %}
+                  {{ spec.identifier }} が未設定
+                {% else %}
+                  {{ spec.identifier }} <span class="k">{{ op_labels.get(spec.op, spec.op) }}</span>
+                  {% if spec.op in ("in", "not_in") %} [{{ spec.value_text.split(",")|length }} 件]
+                  {% else %} "{{ spec.value_text or '—' }}"
+                  {% endif %}
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="rail-sec">
+        <div class="sec-label">
+          <span>保存した条件</span>
+          <span class="r">{{ named|length }}</span>
+        </div>
+        {% if not named %}
+          <div class="saved-empty">まだ保存がありません。</div>
+        {% endif %}
+        <div class="saved-list">
+          {% for item in named %}
+            <button class="saved-item{% if item.name == active_named %} on{% endif %}" form="load-filter-{{ loop.index }}" type="submit">
+              {{ icon("filter", 11) }}
+              <span class="nm">{{ item.name }}</span>
+              <span class="ct">{{ item.count }}</span>
+            </button>
+          {% endfor %}
+        </div>
+        <div class="save-row" style="margin-top:8px">
+          <input class="mini-input" name="name" form="save-filter-form" placeholder="条件名（1〜100文字）" maxlength="100">
+          <button type="submit" class="btn sm primary" form="save-filter-form">保存</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--sub)">
+          <input type="checkbox" name="overwrite" value="1" form="save-filter-form">
+          同名があれば上書き
+        </label>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <div class="rail-actions">
+        <button type="submit" class="btn primary" id="apply-filter">{{ icon("play", 13) }}条件を適用</button>
+        <button type="submit" class="btn" name="clear" value="1">解除</button>
+      </div>
+      <button type="button" class="bulk-cta" data-open="#bulk-modal" {% if match_count == 0 or not custom_names %}disabled{% endif %}>
+        {{ icon("layers", 13) }}
+        <span class="t">一致行に一括で値を設定</span>
+        <span class="n">{{ match_count|comma }}</span>
+      </button>
+    </div>
+  </form>
+</aside>
+
+<template id="filter-cond-tpl">
+  <div class="and-tag">AND</div>
+  <div class="cond filter-condition">
+    <span class="cond-node">1</span>
+    <div class="cond-card dirty">
+      <div class="cond-top">
+        <div class="cond-field">
+          <select class="mini-select" name="identifier" aria-label="列">
+            {{ field_options(log_fields, custom_names) }}
+          </select>
+        </div>
+        <button type="button" class="icon-btn" data-remove-cond title="この条件を削除" aria-label="この条件を削除">{{ icon("close", 12) }}</button>
+      </div>
+      <div class="cond-op">
+        <select class="mini-select" name="op" style="width:118px;flex:none" aria-label="演算子">
+          {{ operator_options() }}
+        </select>
+        <div class="cond-val">
+          <input class="mini-input" name="value" placeholder="値">
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+{% for item in named %}
+  <form id="load-filter-{{ loop.index }}" method="post" action="{{ url_for('work_filter_load', case_id=case_id) }}">
+    <input type="hidden" name="tab" value="list">
+    <input type="hidden" name="name" value="{{ item.name }}">
+  </form>
+{% endfor %}
+<form id="save-filter-form" method="post" action="{{ url_for('work_filter_save', case_id=case_id) }}">
+  <input type="hidden" name="tab" value="list">
+</form>

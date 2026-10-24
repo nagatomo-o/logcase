@@ -1,0 +1,120 @@
+{% from "partials/icons.html" import icon %}
+{% from "partials/macros.html" import type_tag %}
+<div class="ingest-grid">
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="panel">
+      <div class="panel-head">
+        {{ icon("upload", 12) }}
+        <h3>ログファイルを取り込む</h3>
+        <span class="r">access_log / .gz</span>
+      </div>
+      <div class="panel-body">
+        <form method="post" action="{{ url_for('work_import', case_id=case_id) }}" enctype="multipart/form-data">
+          <input type="hidden" name="tab" value="ingest">
+          <label class="drop">
+            <input type="file" name="files" multiple>
+            <div class="ic">{{ icon("upload", 20) }}</div>
+            <div class="t">ファイルを選ぶ</div>
+            <div class="s">複数可。.gz は展開して読みます。</div>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--sub)">
+            <input type="checkbox" name="confirm_same_name" value="1">
+            同じファイル名が既にあっても追加して取り込む
+          </label>
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button type="submit" class="btn primary sm">{{ icon("play", 12) }}取り込み開始</button>
+          </div>
+        </form>
+        <div style="margin-top:12px;display:flex;gap:6px;font-size:10.5px;color:var(--faint);line-height:1.65">
+          {{ icon("info", 11) }}
+          <span>案件内にまったく同じログ行があれば登録しません（重複）。解釈できない行は捨て、件数に出します。途中で失敗した場合はそのファイル分を確定しません。</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="panel">
+      <div class="panel-head">
+        {{ icon("layers", 12) }}
+        <h3>取り込み済みファイル</h3>
+        <span class="r">{{ imports|length }} 件</span>
+      </div>
+      <div class="panel-body" style="padding:0">
+        {% if not imports %}
+          <div style="padding:14px 12px;font-size:11.5px;color:var(--faint)">まだ取り込んでいません。</div>
+        {% else %}
+          <div class="table-scroll">
+            <table class="mini-tbl">
+              <thead>
+                <tr>
+                  <th>元ファイル名</th>
+                  <th class="r">読んだ</th>
+                  <th class="r">入れた</th>
+                  <th class="r">捨てた</th>
+                  <th class="r">重複</th>
+                  <th>取り込み日時</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for f in imports|reverse %}
+                  <tr>
+                    <td class="mono">{{ f.source_filename }}</td>
+                    <td class="mono r">{{ f.read_count|comma }}</td>
+                    <td class="mono r" style="color:var(--ok)">{{ f.inserted_count|comma }}</td>
+                    <td class="mono r" style="color:{% if f.discarded_count %}var(--warn){% else %}var(--faint){% endif %}">{{ f.discarded_count|comma }}</td>
+                    <td class="mono r">{{ f.duplicate_count|comma }}</td>
+                    <td style="font-family:var(--mono);font-size:10.5px;color:var(--sub);white-space:nowrap">{{ f.imported_at|when }}</td>
+                    <td>
+                      <form method="post" action="{{ url_for('work_import_delete', case_id=case_id) }}">
+                        <input type="hidden" name="tab" value="ingest">
+                        <input type="hidden" name="source_filename" value="{{ f.source_filename }}">
+                        <button type="submit" class="btn xs danger">削除</button>
+                      </form>
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        {{ icon("columns", 12) }}
+        <h3>この案件の列構成</h3>
+        <span class="r">LogFormat から確定 / 変更不可</span>
+      </div>
+      <div class="panel-body">
+        <div style="display:flex;flex-wrap:wrap;gap:5px">
+          {% for f in log_fields %}
+            <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 7px;border:1px solid var(--line);border-radius:2px;background:var(--surface-2);font-family:var(--mono);font-size:10.5px">
+              <span style="color:var(--faint);font-size:9px">{{ loop.index }}</span>
+              {{ f.identifier }}
+              {{ type_tag(f.field_type) }}
+            </span>
+          {% endfor %}
+        </div>
+        <div class="regex-box" style="margin-top:10px">{{ logformat }}</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        {{ icon("alert", 12) }}
+        <h3>取り込みの前提</h3>
+      </div>
+      <div class="panel-body" style="font-size:11.5px;color:var(--sub);line-height:1.8">
+        <ul style="margin:0;padding-left:16px">
+          <li>同じファイル名が既にあるときは、足す前に確認します。</li>
+          <li>同じ内容の行は案件内で 1 件だけ。既存行のカスタム値は変わりません。</li>
+          <li>取り込んだファイルは元ファイル名単位で消せます。同じ名前の履歴はまとめて消えます。</li>
+          <li>進行状況はこの画面に出ます。数百万行でも分単位の待ちで完了します。</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>

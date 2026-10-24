@@ -1,0 +1,121 @@
+{% from "partials/icons.html" import icon %}
+<div class="agg-root">
+  <h2>集計</h2>
+  <form method="post" action="{{ url_for('work_aggregate', case_id=case_id) }}" class="agg-config">
+    <input type="hidden" name="tab" value="agg">
+    <div class="agg-row">
+      <div class="agg-block" style="flex:1 1 300px">
+        <span class="lbl">グループ（複数可）</span>
+        <div class="agg-groups">
+          {% for f in log_fields %}
+            <label class="chip">
+              <input type="checkbox" name="group" value="log:{{ f.identifier }}" {% if "log:" ~ f.identifier in agg_groups %}checked{% endif %}>
+              <span class="t">{{ f.identifier }}</span>
+            </label>
+          {% endfor %}
+          {% for name in custom_names %}
+            <label class="chip">
+              <input type="checkbox" name="group" value="custom:{{ name }}" {% if "custom:" ~ name in agg_groups %}checked{% endif %}>
+              <span class="t">＋ {{ name }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="agg-block">
+        <span class="lbl">時間バケット</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <label class="bucket-toggle{% if not has_time_axis %} is-disabled{% endif %}" title="{% if not has_time_axis %}この案件には日時型 Time がありません（E_WRK_CMB01）{% else %}時間軸: Time{% endif %}">
+            <input type="checkbox" name="use_bucket" value="1" {% if agg_form.use_bucket %}checked{% endif %} {% if not has_time_axis %}disabled{% endif %}>
+            {{ icon("clock", 12) }}
+            <span data-bucket-label>{% if agg_form.use_bucket %}使用中{% else %}使わない{% endif %}</span>
+          </label>
+          <div class="bucket-ctl">
+            <input name="n" value="{{ agg_form.n or 1 }}" inputmode="numeric">
+            <select class="mini-select" name="unit" style="width:66px">
+              <option value="second" {% if agg_form.unit == "second" %}selected{% endif %}>秒</option>
+              <option value="minute" {% if (agg_form.unit or "minute") == "minute" %}selected{% endif %}>分</option>
+              <option value="hour" {% if agg_form.unit == "hour" %}selected{% endif %}>時間</option>
+            </select>
+            <span style="font-size:10.5px;color:var(--faint)">ごと</span>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--faint);margin-top:4px;max-width:230px;line-height:1.5">
+          {% if has_time_axis %}軸: Time（ログの TZ 上で区切る）{% else %}時間軸なし{% endif %}
+        </div>
+      </div>
+
+      <div class="agg-block" style="flex:0 1 240px">
+        <span class="lbl">集計値（アクセス数は常に表示）</span>
+        <div class="metric-row">
+          <select class="mini-select" name="metric_fn" style="width:86px">
+            <option value="count" {% if agg_form.metric_fn == "count" %}selected{% endif %}>個数</option>
+            <option value="sum" {% if agg_form.metric_fn == "sum" %}selected{% endif %}>合計</option>
+            <option value="avg" {% if agg_form.metric_fn == "avg" %}selected{% endif %}>平均</option>
+          </select>
+          <select name="metric_id">
+            <option value=""></option>
+            {% for f in log_fields if f.field_type == "number" %}
+              <option value="{{ f.identifier }}" {% if agg_form.metric_id == f.identifier %}selected{% endif %}>{{ f.identifier }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="agg-block" style="margin-left:auto;align-items:flex-end">
+        <span class="lbl">対象: フィルタ一致 {{ match_count|comma }} 行</span>
+        <button type="submit" class="btn primary">{{ icon("chart", 13) }}集計を実行</button>
+        <div style="font-size:10px;color:var(--faint);text-align:right">グループ単位</div>
+      </div>
+    </div>
+  </form>
+
+  {% if not aggregate_rows %}
+    <div class="agg-placeholder">
+      {{ icon("chart", 26) }}
+      <div>グループ列か時間バケットを選び、「集計を実行」を押します。</div>
+      <div style="font-size:11px;color:#b9bec0">対象は画面に見えている行ではなく、適用中の条件に一致する全行です。</div>
+    </div>
+  {% else %}
+    <div class="toolbar" style="background:var(--surface)">
+      <div class="tl">
+        <span class="big">{{ aggregate_rows|length|comma }}</span>
+        <span class="small">グループ</span>
+      </div>
+      <span class="toolbar-sep"></span>
+      <span class="exec-note">対象 <b>{{ match_count|comma }}</b> 行</span>
+      <span class="sp"></span>
+      <form method="post" action="{{ url_for('export_aggregate', case_id=case_id) }}">
+        <input type="hidden" name="tab" value="agg">
+        <button class="btn sm">{{ icon("download", 12) }}集計結果を CSV に</button>
+      </form>
+    </div>
+    <div class="res-wrap table-scroll">
+      <table class="data-tbl">
+        <tr>
+          {% for k in aggregate_rows[0].keys() %}
+            <th>{{ k }}</th>
+          {% endfor %}
+        </tr>
+        {% for row in aggregate_rows %}
+          <tr>
+            {% for k, v in row.items() %}
+              {% if k == "access_count" %}
+                <td class="num" style="position:relative">
+                  {% if agg_max %}
+                    <span class="bar" style="width:{{ (v / agg_max * 100)|round }}%;position:absolute;left:0;top:4px;bottom:4px;background:var(--accent-soft);border-radius:1px"></span>
+                  {% endif %}
+                  <span style="position:relative">{{ v|comma }}</span>
+                </td>
+              {% else %}
+                <td {% if v is number %}class="num"{% endif %}>
+                  {% if v is none or v == "" %}<span class="cell-empty">（未設定）</span>{% else %}{{ v }}{% endif %}
+                </td>
+              {% endif %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  {% endif %}
+</div>

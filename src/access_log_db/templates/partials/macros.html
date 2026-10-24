@@ -1,0 +1,54 @@
+{% from "partials/icons.html" import icon %}
+
+{% macro field_options(log_fields, custom_names, selected="") %}
+  {% for f in log_fields %}
+    <option value="log:{{ f.field_type }}:{{ f.identifier }}"
+      {% if f.field_type == "string" %}data-ops="eq,ne,contains,not_contains,starts,not_starts,in,not_in,gte,lte"
+      {% elif f.field_type == "number" %}data-ops="eq,ne,gt,ge,lt,le,unset"
+      {% else %}data-ops="eq,before,on_or_after,after,on_or_before,unset"{% endif %}
+      {% if selected == "log:" ~ f.field_type ~ ":" ~ f.identifier %}selected{% endif %}
+    >{{ f.identifier }}{% if f.time_axis %}（時間軸）{% endif %}</option>
+  {% endfor %}
+  {% if custom_names %}
+    <option disabled>──────────</option>
+  {% endif %}
+  {% for name in custom_names %}
+    <option value="custom:string:{{ name }}" data-ops="eq,ne,contains,not_contains,starts,not_starts,in,not_in,gte,lte"
+      {% if selected == "custom:string:" ~ name %}selected{% endif %}>＋ {{ name }}</option>
+  {% endfor %}
+{% endmacro %}
+
+{% macro operator_options(selected="") %}
+  {% set labels = {
+    "contains": "含む", "not_contains": "含まない", "starts": "始まる",
+    "not_starts": "始まらない", "in": "複数選択", "not_in": "複数選択以外",
+    "gte": "以上", "lte": "以下",
+    "unset": "未設定", "eq": "等しい", "ne": "等しくない", "gt": "より大きい",
+    "ge": "以上(数値)", "lt": "より小さい", "le": "以下(数値)",
+    "before": "より前", "on_or_after": "以降", "after": "より後",
+    "on_or_before": "以前"
+  } %}
+  {% for op, label in labels.items() %}
+    <option value="{{ op }}" {% if selected == op %}selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+{% endmacro %}
+
+{% macro type_tag(field_type) %}
+  {% set map = {"string": "文字列", "number": "数値", "datetime": "日時"} %}
+  <span class="tag type-{{ field_type }}">{{ map.get(field_type, field_type) }}</span>
+{% endmacro %}
+
+{% macro status_pill(code) %}
+  {% set n = code|int(default=-1) %}
+  {% if n >= 500 %}{% set cls = "s5" %}
+  {% elif n >= 400 %}{% set cls = "s4" %}
+  {% elif n >= 300 %}{% set cls = "s3" %}
+  {% elif n >= 0 %}{% set cls = "s2" %}
+  {% else %}{% set cls = "s3" %}
+  {% endif %}
+  <span class="st {{ cls }}">{{ code }}</span>
+{% endmacro %}
+
+{% macro tab_input(tab) %}
+<input type="hidden" name="tab" value="{{ tab }}">
+{% endmacro %}

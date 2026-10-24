@@ -1,214 +1,127 @@
 {% extends "base.html" %}
-{% block title %}{{ case_name }}{% endblock %}
+{% from "partials/icons.html" import icon %}
+{% block title %}{{ case_name }} — アクセスログ調査{% endblock %}
+{% block body_attrs %}data-page="work" data-tab="{{ tab }}"{% endblock %}
+{% block crumbs %}
+  <a href="{{ url_for('cases_view') }}">案件</a>
+  <span class="sep">/</span>
+  <span class="current">{{ case_name }}</span>
+{% endblock %}
 {% block body %}
-<p><a href="/">一覧へ戻る</a></p>
-<h1>{{ case_name }}</h1>
-<h2>LogFormat</h2>
-<pre>{{ logformat }}</pre>
-
-<h2>列</h2>
-<table>
-  {% for f in log_fields %}
-    <tr><td>{{ f.identifier }}</td><td>{{ f.field_type }}</td><td>{% if f.time_axis %}時間軸{% endif %}</td></tr>
-  {% endfor %}
-</table>
-<form method="post" action="/cases/{{ case_id }}/custom">
-  <input name="name" placeholder="カスタムフィールド名">
-  <button>カスタム追加</button>
-</form>
-{% for name in custom_names %}
-  <form method="post" action="/cases/{{ case_id }}/custom/delete">
-    {{ name }}
-    <input type="hidden" name="name" value="{{ name }}">
-    <input type="hidden" name="confirm" value="1">
-    <button onclick="return confirm('{{ warn_custom_del }}')">削除</button>
-  </form>
-{% endfor %}
-
-<h2>取り込み</h2>
-<form method="post" action="/cases/{{ case_id }}/import" enctype="multipart/form-data">
-  <input type="file" name="files" multiple>
-  <label><input type="checkbox" name="confirm_same_name" value="1"> 同名を追加</label>
-  <button>取り込み開始</button>
-</form>
-<table>
-  {% for f in imports %}
-    <tr><td>{{ f.source_filename }}</td><td>{{ f.read_count }}</td><td>{{ f.imported_at }}</td></tr>
-  {% endfor %}
-</table>
-
-<h2>フィルタ</h2>
-<p>一致件数: {{ match_count }}</p>
-<form method="post" action="/cases/{{ case_id }}/filter">
-  <div class="filter-condition">
-    <select name="identifier">
-      {% for f in log_fields %}
-        <option value="log:{{ f.field_type }}:{{ f.identifier }}"
-          {% if f.field_type == "string" %}data-ops="contains,not_contains,starts,not_starts,in,gte,lte"
-          {% elif f.field_type == "number" %}data-ops="eq,ne,gt,ge,lt,le,unset"
-          {% else %}data-ops="eq,before,on_or_after,after,on_or_before,unset"{% endif %}>{{ f.identifier }}</option>
-      {% endfor %}
-      {% for name in custom_names %}<option value="custom:string:{{ name }}" data-ops="contains,not_contains,starts,not_starts,in,gte,lte">{{ name }}</option>{% endfor %}
-    </select>
-    <select name="op">
-      <option value="contains">含む</option>
-      <option value="not_contains">含まない</option>
-      <option value="starts">始まる</option>
-      <option value="not_starts">始まらない</option>
-      <option value="in">複数選択</option>
-      <option value="gte">以上</option>
-      <option value="lte">以下</option>
-      <option value="unset">未設定</option>
-      <option value="eq">等しい</option>
-      <option value="ne">等しくない</option>
-      <option value="gt">より大きい</option>
-      <option value="ge">以上(数値)</option>
-      <option value="lt">より小さい</option>
-      <option value="le">以下(数値)</option>
-      <option value="before">より前</option>
-      <option value="on_or_after">以降</option>
-      <option value="after">より後</option>
-      <option value="on_or_before">以前</option>
-    </select>
-    <input name="value">
+<div class="subnav">
+  <div class="subnav-inner">
+    <a class="tab{% if tab == 'list' %} on{% endif %}" data-tab="list" href="{{ url_for('work_view', case_id=case_id, tab='list') }}">
+      {{ icon("table", 13) }}一覧
+      <span class="n">{{ match_count|comma }}</span>
+    </a>
+    <a class="tab{% if tab == 'agg' %} on{% endif %}" data-tab="agg" href="{{ url_for('work_view', case_id=case_id, tab='agg') }}">
+      {{ icon("chart", 13) }}集計
+      {% if aggregate_rows %}<span class="n">{{ aggregate_rows|length|comma }}</span>{% endif %}
+    </a>
+    <a class="tab{% if tab == 'ingest' %} on{% endif %}" data-tab="ingest" href="{{ url_for('work_view', case_id=case_id, tab='ingest') }}">
+      {{ icon("upload", 13) }}取り込み
+      {% if imports %}<span class="n">{{ imports|length }}</span>{% endif %}
+    </a>
+    <a class="tab{% if tab == 'schema' %} on{% endif %}" data-tab="schema" href="{{ url_for('work_view', case_id=case_id, tab='schema') }}">
+      {{ icon("columns", 13) }}案件情報
+    </a>
   </div>
-  <button type="button" id="add-filter">条件追加</button>
-  <button>適用</button>
-  <button name="clear" value="1">解除</button>
-</form>
-<script>
-const operatorLabels = {
-  contains: "含む", not_contains: "含まない", starts: "始まる",
-  not_starts: "始まらない", in: "複数選択", gte: "以上", lte: "以下",
-  unset: "未設定", eq: "等しい", ne: "等しくない", gt: "より大きい",
-  ge: "以上(数値)", lt: "より小さい", le: "以下(数値)",
-  before: "より前", on_or_after: "以降", after: "より後",
-  on_or_before: "以前"
-};
-function rebuildOperators(condition) {
-  const identifier = condition.querySelector('select[name="identifier"]');
-  const operator = condition.querySelector('select[name="op"]');
-  const ops = identifier.options[identifier.selectedIndex].dataset.ops.split(",");
-  operator.replaceChildren(...ops.map(function (op) {
-    const option = document.createElement("option");
-    option.value = op;
-    option.textContent = operatorLabels[op];
-    return option;
-  }));
-}
-function bindFilterCondition(condition) {
-  const identifier = condition.querySelector('select[name="identifier"]');
-  identifier.addEventListener("change", function () {
-    rebuildOperators(condition);
-  });
-  rebuildOperators(condition);
-}
-document.querySelectorAll(".filter-condition").forEach(bindFilterCondition);
-document.getElementById("add-filter").addEventListener("click", function () {
-  const first = document.querySelector(".filter-condition");
-  const added = first.cloneNode(true);
-  first.parentNode.insertBefore(added, this);
-  bindFilterCondition(added);
-});
-</script>
-<form method="post" action="/cases/{{ case_id }}/filter/save">
-  <input name="name" placeholder="フィルタ名">
-  <label><input type="checkbox" name="overwrite" value="1"> 上書き</label>
-  <button>保存</button>
-</form>
-<form method="post" action="/cases/{{ case_id }}/filter/load">
-  <select name="name">
-    {% for n in named %}<option>{{ n }}</option>{% endfor %}
-  </select>
-  <button>呼び出し</button>
-</form>
+  <div class="subnav-meta">
+    <div class="meta-kv"><span>取り込み</span><b>{{ imports|length }}</b><span>ファイル</span></div>
+    <span style="width:1px;height:12px;background:var(--line)"></span>
+    <div class="meta-kv"><span>全</span><b>{{ total_row_count|comma }}</b><span>行</span></div>
+    <span style="width:1px;height:12px;background:var(--line)"></span>
+    <div class="meta-kv"><span>最終</span><b style="font-size:11px">{{ last_import|when }}</b></div>
+  </div>
+</div>
 
-<h2>一覧</h2>
-<table>
-  <tr>
-    <th>行ID</th><th>元ファイル名</th><th>ファイル内行番号</th>
-    {% for f in log_fields %}<th>{{ f.identifier }}</th>{% endfor %}
-    {% for name in custom_names %}<th>{{ name }}</th>{% endfor %}
-  </tr>
-  {% for row in rows %}
-    <tr>
-      <td>{{ row.row_id }}</td>
-      <td>{{ row.source_filename }}</td>
-      <td>{{ row.line_no }}</td>
-      {% for f in log_fields %}<td>{{ row[f.identifier] or "" }}</td>{% endfor %}
-      {% for name in custom_names %}
-        <td>
-          <form method="post" action="/cases/{{ case_id }}/cell">
-            <input type="hidden" name="row_id" value="{{ row.row_id }}">
-            <input type="hidden" name="name" value="{{ name }}">
-            <input name="value" value="{{ row[name] or "" }}">
-            <button>更新</button>
-          </form>
-        </td>
-      {% endfor %}
-    </tr>
-  {% endfor %}
-</table>
-{% if rows %}
-  <p><a href="/cases/{{ case_id }}/more?after={{ rows[-1].row_id }}">続き</a></p>
-{% endif %}
+<div class="workspace" data-screen-label="{% if tab == 'list' %}03 一覧{% elif tab == 'agg' %}04 集計{% elif tab == 'ingest' %}02 取り込み{% else %}05 案件情報{% endif %}">
+  {% include "partials/filter_rail.html" %}
+  <div class="main">
+    <div class="table-scroll" data-tab-panel="list"{% if tab != "list" %} hidden{% endif %}>
+      {% include "partials/list_panel.html" %}
+    </div>
+    <div data-tab-panel="agg"{% if tab != "agg" %} hidden{% endif %}>
+      {% include "partials/aggregate_panel.html" %}
+    </div>
+    <div data-tab-panel="ingest"{% if tab != "ingest" %} hidden{% endif %}>
+      {% include "partials/ingest_panel.html" %}
+    </div>
+    <div data-tab-panel="schema"{% if tab != "schema" %} hidden{% endif %}>
+      {% include "partials/schema_panel.html" %}
+    </div>
+  </div>
+</div>
 
-<h2>一括入力</h2>
-<form method="post" action="/cases/{{ case_id }}/bulk">
-  <select name="name">{% for name in custom_names %}<option>{{ name }}</option>{% endfor %}</select>
-  <input name="value">
-  <button>一括実行</button>
-</form>
-{% if bulk_confirm %}
-  <p>{{ bulk_confirm.warning }}</p>
-  <form method="post" action="/cases/{{ case_id }}/bulk">
-    <input type="hidden" name="confirm" value="1">
-    <input type="hidden" name="name" value="{{ bulk_confirm.name }}">
-    <input type="hidden" name="value" value="{{ bulk_confirm.value }}">
-    <button>確認して一括実行</button>
+<div class="scrim{% if bulk_confirm or import_delete_confirm %} is-open{% endif %}" data-close-overlay {% if not bulk_confirm and not import_delete_confirm %}hidden{% endif %}></div>
+<div class="modal{% if bulk_confirm %} is-open{% endif %}" id="bulk-modal" role="dialog" aria-modal="true" aria-label="一致行に一括で値を設定" {% if not bulk_confirm %}hidden{% endif %}>
+  <form method="post" action="{{ url_for('work_bulk', case_id=case_id) }}">
+    <input type="hidden" name="tab" value="list">
+    {% if bulk_confirm %}
+      <input type="hidden" name="confirm" value="1">
+      <input type="hidden" name="name" value="{{ bulk_confirm.name }}">
+      <input type="hidden" name="value" value="{{ bulk_confirm.value }}">
+    {% endif %}
+    <div class="modal-head">
+      <h3>{% if bulk_confirm %}確認して一括実行{% else %}一致行に一括で値を設定{% endif %}</h3>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:3px;margin-bottom:14px">
+        {{ icon("layers", 14) }}
+        <div style="font-size:11.5px;color:var(--ink-2);line-height:1.55">
+          {% if bulk_confirm %}
+            {{ bulk_confirm.warning }}
+          {% else %}
+            対象は<b style="font-family:var(--mono)"> フィルタ一致の {{ match_count|comma }} 行すべて</b>です。<br>
+            <span style="color:var(--sub)">画面に見えている行だけではありません。</span>
+          {% endif %}
+        </div>
+      </div>
+      {% if not bulk_confirm %}
+        <div class="form-row">
+          <div class="form-label">対象カスタムフィールド <span class="req">必須</span></div>
+          <select class="inp" name="name">
+            {% if not custom_names %}<option value="">（カスタムフィールドがありません）</option>{% endif %}
+            {% for name in custom_names %}<option>{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-row" style="margin-bottom:6px">
+          <div class="form-label">値</div>
+          <input class="inp" name="value" placeholder="空にすると未設定へ戻します">
+        </div>
+        <div style="font-size:10.5px;color:var(--faint);margin-top:8px;line-height:1.6">
+          値が空のときは未設定に戻します。実行前に対象件数を確認します。
+        </div>
+      {% endif %}
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" data-close-overlay>キャンセル</button>
+      <button type="submit" class="btn primary">{% if bulk_confirm %}確認して一括実行{% else %}実行する{% endif %}</button>
+    </div>
   </form>
-{% endif %}
-
-<h2>集計</h2>
-<form method="post" action="/cases/{{ case_id }}/aggregate">
-  <label>グループ
-    <select name="group" multiple>
-      {% for f in log_fields %}<option value="log:{{ f.identifier }}">{{ f.identifier }}</option>{% endfor %}
-      {% for name in custom_names %}<option value="custom:{{ name }}">{{ name }}</option>{% endfor %}
-    </select>
-  </label>
-  <label><input type="checkbox" name="use_bucket"> 時間バケット</label>
-  <input name="n" value="1" size="4">
-  <select name="unit">
-    <option value="second">秒</option>
-    <option value="minute">分</option>
-    <option value="hour">時間</option>
-  </select>
-  <select name="metric_id">
-    <option value=""></option>
-    {% for f in log_fields if f.field_type == "number" %}
-      <option value="{{ f.identifier }}">{{ f.identifier }}</option>
-    {% endfor %}
-  </select>
-  <select name="metric_fn">
-    <option value="count">個数</option>
-    <option value="avg">平均</option>
-    <option value="sum">合計</option>
-  </select>
-  <button>集計実行</button>
-</form>
-{% if aggregate_rows %}
-  <table>
-    <tr>{% for k in aggregate_rows[0].keys() %}<th>{{ k }}</th>{% endfor %}</tr>
-    {% for row in aggregate_rows %}
-      <tr>{% for v in row.values() %}<td>{{ v }}</td>{% endfor %}</tr>
-    {% endfor %}
-  </table>
-{% endif %}
-
-<h2>CSV</h2>
-<form method="post" action="/cases/{{ case_id }}/export/rows"><button>一致した行を書き出す</button></form>
-{% if aggregate_rows %}
-  <form method="post" action="/cases/{{ case_id }}/export/aggregate"><button>集計結果を書き出す</button></form>
+</div>
+<div class="modal{% if import_delete_confirm %} is-open{% endif %}" id="import-delete-modal" role="dialog" aria-modal="true" aria-label="取り込みファイルの削除" {% if not import_delete_confirm %}hidden{% endif %}>
+  <form method="post" action="{{ url_for('work_import_delete', case_id=case_id) }}">
+    <input type="hidden" name="tab" value="ingest">
+    {% if import_delete_confirm %}
+      <input type="hidden" name="confirm" value="1">
+      <input type="hidden" name="source_filename" value="{{ import_delete_confirm.filename }}">
+    {% endif %}
+    <div class="modal-head">
+      <h3>取り込みファイルを削除</h3>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0;font-size:12px;color:var(--ink-2);line-height:1.6">
+        {% if import_delete_confirm %}{{ import_delete_confirm.warning }}{% endif %}
+      </p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn" data-close-overlay>キャンセル</button>
+      <button type="submit" class="btn danger">削除する</button>
+    </div>
+  </form>
+</div>
+{% if bulk_confirm or import_delete_confirm %}
+  <script>document.body.classList.add("modal-open");</script>
 {% endif %}
 {% endblock %}

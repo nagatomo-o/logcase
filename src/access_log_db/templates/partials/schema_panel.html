@@ -1,0 +1,130 @@
+{% from "partials/icons.html" import icon %}
+{% from "partials/macros.html" import type_tag %}
+<div class="page" style="background:var(--surface)">
+  <div style="max-width:920px;margin:0 auto;padding:18px 18px 40px">
+    <div class="panel">
+      <div class="panel-head">{{ icon("folder", 12) }}<h3>案件</h3></div>
+      <div class="panel-body">
+        <table class="kv-tbl">
+          <tbody>
+            <tr><th>案件名</th><td style="font-family:var(--ui);font-size:12.5px">{{ case_name }}（変更は案件一覧から）</td></tr>
+            <tr><th>LogFormat</th><td>{{ logformat }}</td></tr>
+            <tr>
+              <th>行数 / ファイル</th>
+              <td>{{ total_row_count|comma }} 行 / {{ imports|length }} ファイル</td>
+            </tr>
+            <tr>
+              <th>時間軸</th>
+              <td>
+                {% if has_time_axis %}Time（%t）
+                {% else %}<span style="color:var(--danger)">なし — 時間集計は使えません</span>
+                {% endif %}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        {{ icon("columns", 12) }}
+        <h3>ログの列（{{ log_fields|length }}）</h3>
+        <span class="r">LogFormat から確定 / 変更不可</span>
+      </div>
+      <div class="panel-body" style="padding:0">
+        <table class="mini-tbl">
+          <thead>
+            <tr>
+              <th style="width:44px">順</th>
+              <th>フィールド識別子</th>
+              <th style="width:90px">型</th>
+              <th style="width:160px">指定子</th>
+              <th style="width:70px">時間軸</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in log_fields %}
+              <tr>
+                <td class="mono" style="color:var(--faint)">{{ loop.index }}</td>
+                <td style="font-family:var(--mono);font-size:11.5px">{{ f.identifier }}</td>
+                <td>{{ type_tag(f.field_type) }}</td>
+                <td style="font-family:var(--mono);font-size:10.5px;color:var(--sub)">{{ f.specifier }}</td>
+                <td>{% if f.time_axis %}<span class="tag axis">軸</span>{% else %}<span style="color:#c3c8ca">—</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        {{ icon("pencil", 12) }}
+        <h3>カスタムフィールド（{{ custom_names|length }}）</h3>
+      </div>
+      <div class="panel-body">
+        <form method="post" action="{{ url_for('work_custom', case_id=case_id) }}" style="display:flex;gap:6px;margin-bottom:12px;align-items:flex-start">
+          <input type="hidden" name="tab" value="schema">
+          <input class="inp" name="name" style="height:28px" placeholder="名前（例: 機能名、業務分類、対応状況）" maxlength="100">
+          <button class="btn sm primary">追加</button>
+        </form>
+        {% if not custom_names %}
+          <div style="font-size:11.5px;color:var(--faint);padding:4px 0 8px;line-height:1.6">
+            まだありません。機能名や業務分類などを足すと、一覧で 1 行ずつ／まとめて入力できます。<br>
+            型は文字列のみ。名前は案件内で一意、ログの列名とも重ねられません。
+          </div>
+        {% else %}
+          <table class="mini-tbl">
+            <thead>
+              <tr><th>名前</th><th style="width:80px">型</th><th style="width:44px"></th></tr>
+            </thead>
+            <tbody>
+              {% for name in custom_names %}
+                <tr>
+                  <td style="font-size:12px">{{ name }}</td>
+                  <td>{{ type_tag("string") }}</td>
+                  <td class="r">
+                    <form method="post" action="{{ url_for('work_custom_delete', case_id=case_id) }}" onsubmit="return confirm('{{ warn_custom_del }}')">
+                      <input type="hidden" name="tab" value="schema">
+                      <input type="hidden" name="name" value="{{ name }}">
+                      <input type="hidden" name="confirm" value="1">
+                      <button type="submit" class="icon-btn" title="削除" aria-label="削除">{{ icon("trash", 12) }}</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:14px">
+      <div class="panel-head">
+        {{ icon("filter", 12) }}
+        <h3>保存した条件（{{ named|length }}）</h3>
+      </div>
+      <div class="panel-body" style="padding:0">
+        <table class="mini-tbl">
+          <thead><tr><th style="width:200px">条件名</th><th>内容</th></tr></thead>
+          <tbody>
+            {% if not named %}
+              <tr><td colspan="2" style="color:var(--faint);font-size:11.5px">ありません</td></tr>
+            {% endif %}
+            {% for item in named %}
+              <tr>
+                <td style="font-size:12px">{{ item.name }}</td>
+                <td style="font-family:var(--mono);font-size:10.5px;color:var(--sub)">
+                  {% for c in item.spec %}
+                    {{ c.identifier }} {{ op_labels.get(c.op, c.op) }} {% if c.value is iterable and c.value is not string %}{{ c.value|join(" / ") }}{% else %}{{ c.value }}{% endif %}{% if not loop.last %}　AND　{% endif %}
+                  {% endfor %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

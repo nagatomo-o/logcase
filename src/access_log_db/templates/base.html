@@ -1,19 +1,62 @@
+{% from "partials/icons.html" import icon %}
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=1440">
   <title>{% block title %}アクセスログ調査{% endblock %}</title>
-  <style>
-    body { font-family: sans-serif; margin: 1rem; }
-    table { border-collapse: collapse; }
-    td, th { border: 1px solid #ccc; padding: 4px 8px; }
-    .flash { margin: 0.5rem 0; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-  {% for cat, message in get_flashed_messages(with_categories=true) %}
-    <p class="flash">{{ message }}</p>
-  {% endfor %}
+<body class="app" {% block body_attrs %}{% endblock %}>
+  {% include "partials/icon_sprite.html" %}
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('cases_view') }}">
+      <div class="brand-mark">{{ icon("filter", 13) }}</div>
+      <div>
+        <div class="brand-name">アクセスログ調査</div>
+        <div class="brand-sub">APACHE ACCESS LOG WORKBENCH</div>
+      </div>
+    </a>
+    <div class="crumbs">
+      <span class="sep">/</span>
+      {% block crumbs %}
+      <span class="current">案件一覧</span>
+      {% endblock %}
+    </div>
+    <div class="topbar-right">
+      <div class="env"><span class="dot"></span>127.0.0.1:8765</div>
+      <div class="menu-wrap">
+        <button type="button" class="icon-btn" data-menu-toggle title="この画面について" aria-label="この画面について">
+          {{ icon("info", 13) }}
+        </button>
+        <div class="menu right" hidden>
+          <div class="menu-head">操作の約束</div>
+          <div style="padding:2px 8px 8px;font-size:11px;color:var(--sub);line-height:1.7">
+            フィルタ・一括設定・集計・CSV は、すべて<b>適用中の条件に一致する全行</b>が対象です。
+            画面に見えている範囲に限定されません。
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
   {% block body %}{% endblock %}
+
+  <div class="toasts" aria-live="polite">
+    {% for cat, message in get_flashed_messages(with_categories=true) %}
+      {% set kind = cat if cat in ["ok", "warn", "err", "info"] else "info" %}
+      <div class="toast {{ kind }}">
+        <span class="bar"></span>
+        <div class="body"><div class="t">{{ message }}</div></div>
+        <button type="button" class="icon-btn" data-dismiss-toast title="閉じる" aria-label="閉じる">
+          {{ icon("close", 12) }}
+        </button>
+      </div>
+    {% endfor %}
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

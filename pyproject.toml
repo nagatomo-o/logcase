@@ -18,7 +18,7 @@ access-log-db = "access_log_db.app:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-access_log_db = ["templates/*.html"]
+access_log_db = ["templates/*.html", "templates/partials/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

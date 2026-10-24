@@ -1,37 +1,204 @@
 {% extends "base.html" %}
+{% from "partials/icons.html" import icon %}
+{% block title %}案件 — アクセスログ調査{% endblock %}
 {% block body %}
-<h1>案件</h1>
-<form method="post" action="/cases">
-  <label>案件名 <input name="name" required></label>
-  <label>LogFormat文字列 <textarea name="logformat" rows="3" cols="80" required></textarea></label>
-  <button type="submit">作成</button>
-</form>
-<table>
-  <tr>
-    <th>案件名</th><th>LogFormat先頭</th><th>ファイル数</th><th>行数</th><th>最終取り込み</th><th></th>
-  </tr>
-  {% for case in cases %}
-    {% if case.error %}
-      <tr><td colspan="6">読めないファイル: {{ case.error }}</td></tr>
-    {% else %}
-      <tr>
-        <td><a href="/cases/{{ case.id }}">{{ case.name }}</a></td>
-        <td>{{ case.logformat_head }}</td>
-        <td>{{ case.file_count }}</td>
-        <td>{{ case.row_count }}</td>
-        <td>{{ case.last_import or "" }}</td>
-        <td>
-          <form method="post" action="/cases/{{ case.id }}/rename">
-            <input name="name" value="{{ case.name }}">
-            <button>名称変更</button>
-          </form>
-          <form method="post" action="/cases/{{ case.id }}/delete">
-            <input type="hidden" name="confirm" value="1">
-            <button onclick="return confirm('{{ warn_delete }}')">削除</button>
-          </form>
-        </td>
-      </tr>
-    {% endif %}
-  {% endfor %}
-</table>
+<div class="main" data-screen-label="01 案件一覧">
+  <div class="page">
+    <div class="page-inner">
+      <div class="page-head">
+        <h1>案件</h1>
+        <span class="lead">調査の単位。1 案件 = 1 LogFormat。</span>
+        <span class="sp"></span>
+        <button type="button" class="btn primary" data-open="#create-drawer">{{ icon("plus", 13) }}案件を作成</button>
+      </div>
+
+      <div class="page-note">
+        {{ icon("info", 12) }}
+        <span>
+          列の構成は案件の作成時に <span class="code">LogFormat</span> で確定し、あとから変わりません。
+          別の書式のログを調べるときは案件を分けます。
+        </span>
+        <span style="margin-left:auto;display:flex;gap:14px;flex:none">
+          <span><b style="font-family:var(--mono)">{{ case_count }}</b> 案件</span>
+          <span><b style="font-family:var(--mono)">{{ file_total }}</b> ファイル</span>
+          <span><b style="font-family:var(--mono)">{{ row_total|comma }}</b> 行</span>
+        </span>
+      </div>
+
+      {% if not cases %}
+        <div class="empty-state" style="border:1px dashed var(--line);border-radius:3px;min-height:260px">
+          <div class="big">案件がありません</div>
+          <div class="sm">まず案件を作成し、対象サーバの Apache 設定から LogFormat を貼り付けます。</div>
+          <button type="button" class="btn primary" data-open="#create-drawer">{{ icon("plus", 13) }}案件を作成</button>
+        </div>
+      {% else %}
+        <div class="table-scroll">
+        <div class="case-tbl">
+          <div class="case-tr head">
+            <div class="case-cell">案件名</div>
+            <div class="case-cell">LogFormat</div>
+            <div class="case-cell" style="text-align:right">ファイル</div>
+            <div class="case-cell" style="text-align:right">行数</div>
+            <div class="case-cell">最終取り込み</div>
+            <div class="case-cell"></div>
+          </div>
+          {% for case in cases %}
+            {% if case.error %}
+              <div class="case-tr error">
+                <div class="case-cell" style="grid-column:1 / -1">読めないファイル: {{ case.error }}</div>
+              </div>
+            {% else %}
+              <div class="case-tr" data-href="{{ url_for('work_view', case_id=case.id) }}">
+                <div class="case-cell">
+                  <a class="case-name" href="{{ url_for('work_view', case_id=case.id) }}">{{ case.name }}</a>
+                </div>
+                <div class="case-cell" title="{{ case.logformat }}">
+                  <div class="case-fmt">{{ case.logformat_head }}</div>
+                </div>
+                <div class="case-cell"><div class="case-num">{{ case.file_count }}</div></div>
+                <div class="case-cell">
+                  <div class="case-num">{{ case.row_count|comma }}<span class="u">行</span></div>
+                </div>
+                <div class="case-cell"><div class="case-date">{{ case.last_import|when }}</div></div>
+                <div class="case-cell" style="display:flex;justify-content:flex-end">
+                  <div class="menu-wrap" data-stop-row>
+                    <button type="button" class="icon-btn" data-menu-toggle title="操作" aria-label="操作">{{ icon("dots", 13) }}</button>
+                    <div class="menu right" hidden>
+                      <a class="menu-item" href="{{ url_for('work_view', case_id=case.id) }}">{{ icon("arrowRight", 12) }}<span>作業画面を開く</span></a>
+                      <button type="button" class="menu-item" data-open="#rename-{{ case.id }}">{{ icon("pencil", 12) }}<span>案件名を変更</span></button>
+                      <div class="menu-sep"></div>
+                      <button type="button" class="menu-item danger" data-open="#delete-{{ case.id }}">{{ icon("trash", 12) }}<span>案件を削除</span></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+        </div>
+      {% endif %}
+
+      <div class="note-cards">
+        <div class="note-card">
+          {{ icon("lock", 13) }}
+          <div>
+            <div style="font-size:11.5px;font-weight:500;color:var(--ink-2)">ローカルのみ</div>
+            <div style="font-size:10.5px;color:var(--faint);margin-top:2px;line-height:1.5">この PC の外へは出しません。ログインはありません。</div>
+          </div>
+        </div>
+        <div class="note-card">
+          {{ icon("file", 13) }}
+          <div>
+            <div style="font-size:11.5px;font-weight:500;color:var(--ink-2)">取り込みは手元のファイル</div>
+            <div style="font-size:10.5px;color:var(--faint);margin-top:2px;line-height:1.5">access_log / .gz。サーバへは接続しません。</div>
+          </div>
+        </div>
+        <div class="note-card">
+          {{ icon("alert", 13) }}
+          <div>
+            <div style="font-size:11.5px;font-weight:500;color:var(--ink-2)">バックアップ機能はありません</div>
+            <div style="font-size:10.5px;color:var(--faint);margin-top:2px;line-height:1.5">消えたらサーバ上のログから取り直します。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" data-close-overlay hidden></div>
+<aside class="drawer" id="create-drawer" role="dialog" aria-modal="true" aria-label="案件を作成" hidden>
+  <form method="post" action="{{ url_for('cases_create') }}" id="create-form">
+    <div class="drawer-head">
+      <div>
+        <h3>案件を作成</h3>
+        <div style="font-size:11px;color:var(--faint);margin-top:1px">名前と LogFormat を決めると列が確定します</div>
+      </div>
+      <button type="button" class="icon-btn" data-close-overlay title="閉じる" aria-label="閉じる">{{ icon("close", 13) }}</button>
+    </div>
+    <div class="drawer-body">
+      <div class="form-row">
+        <div class="form-label">案件名 <span class="req">必須</span></div>
+        <input class="inp" name="name" required maxlength="100" placeholder="例: ECサイト 2024年度 / 社内ポータル" autocomplete="off">
+        <div class="form-hint">1〜100 文字。あとから変更できます。</div>
+      </div>
+      <div class="form-row">
+        <div class="form-label">
+          LogFormat 文字列 <span class="req">必須</span>
+          <span style="margin-left:auto;display:flex;gap:4px">
+            <button type="button" class="btn xs ghost" data-preset='%h %l %u %t \"%r\" %>s %b'>common</button>
+            <button type="button" class="btn xs ghost" data-preset='%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\"'>combined</button>
+          </span>
+        </div>
+        <textarea class="inp mono" name="logformat" id="logformat-input" rows="3" required placeholder='%h %l %u %t \"%r\" %>s %b' spellcheck="false"></textarea>
+        <div class="form-hint">
+          対象サーバの Apache 設定（<span class="code">LogFormat</span> 行）からコピーして貼り付けます。登録後は変更できません。
+        </div>
+        <div class="err" id="format-error" hidden></div>
+      </div>
+      <div id="format-preview" hidden>
+        <div class="sec-title" style="margin-top:4px">確定する列（<span id="format-count">0</span>）</div>
+        <div class="fmt-preview">
+          <div class="fmt-preview-head">
+            {{ icon("columns", 11) }}
+            この並び・この型で固定されます
+            <span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)">カスタム列は作業画面で追加できます</span>
+          </div>
+          <div class="fmt-fields" id="format-fields"></div>
+        </div>
+        <div class="sec-title">行マッチ用パターン</div>
+        <div class="regex-box" id="format-regex"></div>
+      </div>
+    </div>
+    <div class="drawer-foot">
+      <div id="format-foot-msg" style="flex:1;font-size:11px;color:var(--faint);align-self:center"></div>
+      <button type="button" class="btn" data-close-overlay>キャンセル</button>
+      <button type="submit" class="btn primary" id="create-submit">{{ icon("check", 13) }}作成する</button>
+    </div>
+  </form>
+</aside>
+
+{% for case in cases if not case.error %}
+  <div class="modal" id="rename-{{ case.id }}" role="dialog" aria-modal="true" aria-label="案件名を変更" hidden>
+    <form method="post" action="{{ url_for('cases_rename', case_id=case.id) }}">
+      <div class="modal-head">
+        <h3>案件名を変更</h3>
+      </div>
+      <div class="modal-body">
+        <div class="form-row" style="margin-bottom:8px">
+          <div class="form-label">案件名 <span class="req">必須</span></div>
+          <input class="inp" name="name" value="{{ case.name }}" required maxlength="100">
+        </div>
+        <div class="form-hint">LogFormat と取り込み済みのデータは変わりません（{{ case.row_count|comma }} 行）。</div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" data-close-overlay>キャンセル</button>
+        <button type="submit" class="btn primary">変更する</button>
+      </div>
+    </form>
+  </div>
+  <div class="modal" id="delete-{{ case.id }}" role="dialog" aria-modal="true" aria-label="案件を削除" hidden>
+    <form method="post" action="{{ url_for('cases_delete', case_id=case.id) }}" data-delete-form>
+      <input type="hidden" name="confirm" value="1">
+      <div class="modal-head">
+        <h3>{{ warn_delete }}</h3>
+        <p style="margin-top:8px">
+          <b>{{ case.name }}</b> のアクセスログ {{ case.row_count|comma }} 行、取り込みファイル {{ case.file_count }} 件がすべて消えます。
+        </p>
+      </div>
+      <div class="modal-body">
+        <div style="padding:8px 10px;background:var(--danger-soft);border:1px solid #eccfc9;border-radius:3px;font-size:11px;color:#7d2a20">
+          行単位では削除できません。取り込みファイルは作業画面の取り込みタブから消せます。バックアップ機能もありません。
+        </div>
+        <div class="form-row" style="margin-top:14px;margin-bottom:0">
+          <div class="form-label">確認のため案件名を入力</div>
+          <input class="inp" data-confirm-name="{{ case.name }}" placeholder="{{ case.name }}" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn" data-close-overlay>キャンセル</button>
+        <button type="submit" class="btn danger" data-confirm-submit>削除する</button>
+      </div>
+    </form>
+  </div>
+{% endfor %}
 {% endblock %}
