@@ -85,6 +85,30 @@ def _one(cond: Condition) -> tuple[str, list[Any]]:
         ops = {"eq": "=", "ne": "!=", "gt": ">", "ge": ">=", "lt": "<", "le": "<="}
         pred = f"{col_u} = 0 AND {col_n} {ops[cond.op]} ?"
         return exists.format(pred=pred), [key, number]
+    if cond.field_type == "string" and cond.op in {"eq", "ne", "in", "not_in"}:
+        if cond.source == "custom":
+            table, key_col, alias = "custom_values", "name", "c"
+        else:
+            table, key_col, alias = "log_values", "identifier", "v"
+        if cond.op in {"eq", "ne"}:
+            inner = (
+                f"SELECT {alias}.row_id FROM {table} {alias} "
+                f"WHERE {alias}.{key_col} = ? AND {alias}.str_value = ?"
+            )
+            params = [key, cond.value]
+            if cond.op == "ne":
+                return f"r.row_id NOT IN ({inner})", params
+            return f"r.row_id IN ({inner})", params
+        values = list(cond.value or [])
+        placeholders = ",".join("?" * len(values)) or "NULL"
+        inner = (
+            f"SELECT {alias}.row_id FROM {table} {alias} "
+            f"WHERE {alias}.{key_col} = ? AND {alias}.str_value IN ({placeholders})"
+        )
+        params = [key, *values]
+        if cond.op == "not_in":
+            return f"r.row_id NOT IN ({inner})", params
+        return f"r.row_id IN ({inner})", params
     if cond.op == "contains":
         pred = f"{col_s} IS NOT NULL AND instr({col_s}, ?) > 0"
         return exists.format(pred=pred), [key, cond.value]
@@ -103,11 +127,6 @@ def _one(cond: Condition) -> tuple[str, list[Any]]:
     if cond.op == "lte":
         pred = f"{col_s} IS NOT NULL AND {col_s} <= ?"
         return exists.format(pred=pred), [key, cond.value]
-    if cond.op == "in":
-        values = list(cond.value or [])
-        placeholders = ",".join("?" * len(values)) or "NULL"
-        pred = f"{col_s} IN ({placeholders})"
-        return exists.format(pred=pred), [key, *values]
     raise ValueError(f"unknown op {cond.op}")
 
 

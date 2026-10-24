@@ -87,6 +87,31 @@ def test_log_fields_persisted(tmp_path: Path):
         "select identifier from log_fields order by display_order"
     )]
     assert ids == [
-        "RemoteHost", "RemoteLogName", "RemoteUser", "Time", "Request", "Status", "Bytes",
+        "RemoteHost",
+        "RemoteLogName",
+        "RemoteUser",
+        "Time",
+        "Request",
+        "Request-Method",
+        "Request-Path",
+        "Request-Query",
+        "Request-Protocol",
+        "Status",
+        "Bytes",
     ]
+    conn.close()
+
+
+def test_open_case_creates_missing_time_wall_index(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    path = tmp_path / f"{cid}.sqlite"
+    raw = sqlite3.connect(path)
+    raw.execute("DROP INDEX IF EXISTS idx_log_rows_time_wall")
+    raw.commit()
+    raw.close()
+    conn = open_case(tmp_path, cid)
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_log_rows_time_wall'"
+    ).fetchone()
+    assert row is not None
     conn.close()

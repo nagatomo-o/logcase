@@ -2,7 +2,7 @@ from pathlib import Path
 from access_log_db.custom_fields import add_custom_field, set_custom_value
 from access_log_db.store import create_case, open_case
 from access_log_db.import_log import import_file
-from access_log_db.filters import Condition, count_rows, fetch_rows
+from access_log_db.filters import Condition, count_rows, fetch_rows, _one
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
 
@@ -76,8 +76,161 @@ def test_fetch_rows_batches_value_queries(tmp_path: Path):
     conn.close()
 
 
+def test_filter_contains_request_path(tmp_path: Path):
+    conn = _conn(tmp_path)
+    conds = [Condition("Request-Path", "log", "string", "contains", "/api")]
+    assert count_rows(conn, conds) == 1
+    rows = fetch_rows(conn, conds, after_row_id=0)
+    assert rows[0]["Request-Path"] == "/api"
+    assert rows[0]["Request-Query"] == ""
+    conn.close()
+
+
 def test_datetime_on_or_after(tmp_path: Path):
     conn = _conn(tmp_path)
     conds = [Condition("Time", "log", "datetime", "on_or_after", "2024-10-10T13:00:00")]
     assert count_rows(conn, conds) == 2
     conn.close()
+
+
+def test_not_in_excludes_listed_request_methods(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "200"),
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "POST /b HTTP/1.1" 200 10\n',
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "HEAD /c HTTP/1.1" 200 10\n',
+        ],
+    )
+    conds = [
+        Condition("Request-Method", "log", "string", "not_in", ["GET", "HEAD"]),
+    ]
+    assert count_rows(conn, conds) == 1
+    rows = fetch_rows(conn, conds, after_row_id=0)
+    assert rows[0]["Request-Method"] == "POST"
+    conn.close()
+
+
+def test_not_in_keeps_unset_custom_values(tmp_path: Path):
+    conn = _conn(tmp_path)
+    add_custom_field(conn, "note")
+    set_custom_value(conn, 2, "note", "bot")
+    conds = [Condition("note", "custom", "string", "not_in", ["bot"])]
+    assert count_rows(conn, conds) == 2
+    ids = [r["row_id"] for r in fetch_rows(conn, conds, after_row_id=0)]
+    assert ids == [1, 3]
+    conn.close()
+
+
+def test_not_in_empty_list_matches_all(tmp_path: Path):
+    conn = _conn(tmp_path)
+    conds = [Condition("Request-Method", "log", "string", "not_in", [])]
+    assert count_rows(conn, conds) == 3
+    conn.close()
+
+
+def test_string_eq_request_method(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "200"),
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "POST /b HTTP/1.1" 200 10\n',
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "HEAD /c HTTP/1.1" 200 10\n',
+        ],
+    )
+    conds = [Condition("Request-Method", "log", "string", "eq", "GET")]
+    assert count_rows(conn, conds) == 1
+    rows = fetch_rows(conn, conds, after_row_id=0)
+    assert rows[0]["Request-Method"] == "GET"
+    ne = [Condition("Request-Method", "log", "string", "ne", "GET")]
+    assert count_rows(conn, ne) == 2
+    methods = {r["Request-Method"] for r in fetch_rows(conn, ne, after_row_id=0)}
+    assert methods == {"POST", "HEAD"}
+    conn.close()
+
+
+def test_string_ne_keeps_unset_custom_values(tmp_path: Path):
+    conn = _conn(tmp_path)
+    add_custom_field(conn, "note")
+    set_custom_value(conn, 2, "note", "bot")
+    conds = [Condition("note", "custom", "string", "ne", "bot")]
+    assert count_rows(conn, conds) == 2
+    ids = [r["row_id"] for r in fetch_rows(conn, conds, after_row_id=0)]
+    assert ids == [1, 3]
+    conn.close()
+
+
+def test_string_eq_keeps_comma_in_value(tmp_path: Path):
+    conn = _conn(tmp_path)
+    add_custom_field(conn, "note")
+    set_custom_value(conn, 1, "note", "a,b")
+    set_custom_value(conn, 2, "note", "a")
+    conds = [Condition("note", "custom", "string", "eq", "a,b")]
+    assert count_rows(conn, conds) == 1
+    assert fetch_rows(conn, conds, after_row_id=0)[0]["row_id"] == 1
+    conn.close()
+
+
+def test_string_eq_empty_and_ne_complement(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "200"),
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /b?x=1 HTTP/1.1" 200 10\n',
+        ],
+    )
+    eq = [Condition("Request-Query", "log", "string", "eq", "")]
+    assert count_rows(conn, eq) == 1
+    assert fetch_rows(conn, eq, after_row_id=0)[0]["Request-Path"] == "/a"
+    ne = [Condition("Request-Query", "log", "string", "ne", "")]
+    assert count_rows(conn, ne) == 1
+    assert fetch_rows(conn, ne, after_row_id=0)[0]["Request-Query"] == "x=1"
+    conn.close()
+
+
+def test_datetime_after_excludes_exact_wall_second(tmp_path: Path):
+    conn = _conn(tmp_path)
+    conds = [Condition("Time", "log", "datetime", "after", "2024-10-10T12:00:00")]
+    assert count_rows(conn, conds) == 2
+    ids = [r["row_id"] for r in fetch_rows(conn, conds, after_row_id=0)]
+    assert ids == [2, 3]
+    conn.close()
+
+
+def test_time_on_or_after_and_request_method_eq(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "200"),
+            '127.0.0.1 - - [10/Oct/2024:13:00:00 +0900] "POST /b HTTP/1.1" 200 10\n',
+            '127.0.0.1 - - [11/Oct/2024:12:00:00 +0900] "GET /c HTTP/1.1" 200 10\n',
+        ],
+    )
+    conds = [
+        Condition("Time", "log", "datetime", "on_or_after", "2024-10-10T13:00:00"),
+        Condition("Request-Method", "log", "string", "eq", "POST"),
+    ]
+    assert count_rows(conn, conds) == 1
+    rows = fetch_rows(conn, conds, after_row_id=0)
+    assert rows[0]["Request-Method"] == "POST"
+    assert rows[0]["Request-Path"] == "/b"
+    conn.close()
+
+
+def test_string_eq_sql_uses_in_subquery():
+    sql, params = _one(Condition("Request-Method", "log", "string", "eq", "POST"))
+    assert "row_id IN (SELECT" in sql
+    assert "EXISTS" not in sql
+    assert params == ["Request-Method", "POST"]

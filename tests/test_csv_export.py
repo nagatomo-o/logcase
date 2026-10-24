@@ -25,6 +25,10 @@ LOG_HEADERS = [
     "RemoteUser",
     "Time",
     "Request",
+    "Request-Method",
+    "Request-Path",
+    "Request-Query",
+    "Request-Protocol",
     "Status",
     "Bytes",
 ]
@@ -78,19 +82,24 @@ def test_rows_csv_columns_custom_and_unset(tmp_path: Path):
     assert n == 2
     rows = list(csv.reader(io.StringIO(out.read_bytes().decode("utf-8-sig"))))
     assert rows[0][:3] == ["行ID", "元ファイル名", "ファイル内行番号"]
-    assert rows[0][3:10] == LOG_HEADERS
-    assert rows[0][10:] == ["機能名", "担当"]
+    assert rows[0][3:14] == LOG_HEADERS
+    assert rows[0][14:] == ["機能名", "担当"]
     assert rows[1][0] == "1"
     assert rows[1][1] == "access_log"
     assert rows[1][2] == "1"
     assert rows[1][3] == "127.0.0.1"
     assert rows[1][6] == "10/Oct/2024:12:00:00 +0900"
-    assert rows[1][8] == "200"
-    assert rows[1][9] == "1234"
-    assert rows[1][10] == "検索"
-    assert rows[1][11] == ""
-    assert rows[2][10] == ""
-    assert rows[2][11] == ""
+    assert rows[1][7] == "GET /index HTTP/1.1"
+    assert rows[1][8] == "GET"
+    assert rows[1][9] == "/index"
+    assert rows[1][10] == ""
+    assert rows[1][11] == "HTTP/1.1"
+    assert rows[1][12] == "200"
+    assert rows[1][13] == "1234"
+    assert rows[1][14] == "検索"
+    assert rows[1][15] == ""
+    assert rows[2][14] == ""
+    assert rows[2][15] == ""
     conn.close()
 
 

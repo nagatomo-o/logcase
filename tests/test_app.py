@@ -7,6 +7,7 @@ from access_log_db.store import open_case
 
 
 COMMON = '%h %l %u %t \\"%r\\" %>s %b'
+LINE = '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /index HTTP/1.1" 200 1234\n'
 
 
 def test_create_case_and_open_work(tmp_path: Path):
@@ -92,6 +93,91 @@ def _create_case(client, name: str) -> str:
     return prefix.rsplit("/cases/", 1)[1].split('"', 1)[0]
 
 
+def test_applied_filter_conditions_stay_on_work_page(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:string:RemoteHost", "op": "contains", "value": "10.0.0."},
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert 'class="cond filter-condition"' in html
+    assert "10.0.0." in html
+    assert "適用中" in html
+
+
+def test_invalid_datetime_filter_keeps_entered_conditions(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": "log:datetime:Time",
+            "op": "on_or_after",
+            "value": "2024/10/18 09:00:00",
+        },
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "日時として解釈できません。" in html
+    assert 'class="cond filter-condition"' in html
+    assert "2024/10/18 09:00:00" in html
+
+
+def test_invalid_datetime_filter_list_get_stays_on_work(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": "log:datetime:Time",
+            "op": "on_or_after",
+            "value": "2024/10/18 09:00:00",
+        },
+    )
+
+    for _ in range(2):
+        rv = client.get(f"/cases/{cid}?tab=list", follow_redirects=True)
+        html = rv.data.decode("utf-8")
+        assert rv.status_code == 200
+        assert rv.request.path == f"/cases/{cid}"
+        assert 'class="cond filter-condition"' in html
+        assert "2024/10/18 09:00:00" in html
+
+
+def test_invalid_number_filter_keeps_entered_conditions(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:number:Status", "op": "eq", "value": "abc"},
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "数値として解釈できません。" in html
+    assert 'class="cond filter-condition"' in html
+    assert "abc" in html
+
+
 def test_invalid_operator_filter_is_rejected_without_bricking_work(tmp_path: Path):
     app = create_app(tmp_path)
     app.config["TESTING"] = True
@@ -118,10 +204,89 @@ def test_filter_operator_options_follow_selected_field_type(tmp_path: Path):
 
     rv = client.get(f"/cases/{cid}")
 
-    assert b'data-ops="contains,not_contains,starts,not_starts,in,gte,lte"' in rv.data
+    assert b'data-ops="eq,ne,contains,not_contains,starts,not_starts,in,not_in,gte,lte"' in rv.data
     assert b'data-ops="eq,ne,gt,ge,lt,le,unset"' in rv.data
     assert b'data-ops="eq,before,on_or_after,after,on_or_before,unset"' in rv.data
-    assert b"rebuildOperators" in rv.data
+    js = client.get("/static/app.js").data
+    assert b"rebuildOperators" in js
+
+
+def test_string_eq_filter_round_trip_keeps_comma(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": "log:string:RemoteHost",
+            "op": "eq",
+            "value": "a,b",
+        },
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "等しい" in html
+    assert "a,b" in html
+    with client.session_transaction() as sess:
+        spec = sess["filters_by_case"][cid]
+        assert spec[0]["op"] == "eq"
+        assert spec[0]["value"] == "a,b"
+
+
+def test_string_ne_filter_round_trip(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": "log:string:RemoteHost",
+            "op": "ne",
+            "value": "10.0.0.1",
+        },
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "等しくない" in html
+    assert "10.0.0.1" in html
+    with client.session_transaction() as sess:
+        spec = sess["filters_by_case"][cid]
+        assert spec[0]["op"] == "ne"
+        assert spec[0]["value"] == "10.0.0.1"
+
+
+def test_not_in_filter_round_trip(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": "log:string:RemoteHost",
+            "op": "not_in",
+            "value": "10.0.0.1,10.0.0.2",
+        },
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "複数選択以外" in html
+    assert "10.0.0.1,10.0.0.2" in html
+    with client.session_transaction() as sess:
+        spec = sess["filters_by_case"][cid]
+        assert spec[0]["op"] == "not_in"
+        assert spec[0]["value"] == ["10.0.0.1", "10.0.0.2"]
 
 
 def test_invalid_after_on_existing_case_defaults_to_zero(tmp_path: Path):
@@ -276,3 +441,199 @@ def test_work_page_metric_select_has_empty_option(tmp_path: Path):
     select = html[start : html.index("</select>", start)]
 
     assert '<option value=""></option>' in select
+
+
+def test_tables_do_not_wrap_cells(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    listing = client.get("/").data.decode("utf-8")
+    work = client.get(f"/cases/{cid}").data.decode("utf-8")
+    css = client.get("/static/styles.css").data.decode("utf-8")
+
+    assert "white-space: nowrap" in css
+    assert "overflow-x: auto" in css or "overflow: auto" in css
+    assert 'class="table-scroll"' in listing
+    assert 'class="table-scroll"' in work
+
+
+def test_aggregate_group_checkboxes_accept_multiple(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    payload = (
+        b'127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /a HTTP/1.0" 200 1\n'
+        b'10.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET /b HTTP/1.0" 404 1\n'
+    )
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(payload), "access_log")},
+        content_type="multipart/form-data",
+    )
+
+    work = client.get(f"/cases/{cid}").data.decode("utf-8")
+    assert 'type="checkbox" name="group"' in work
+    assert '<select name="group"' not in work
+    assert "グループ（複数可）" in work
+
+    rv = client.post(
+        f"/cases/{cid}/aggregate",
+        data={"group": ["log:Status", "log:RemoteHost"]},
+        follow_redirects=True,
+    )
+    html = rv.data.decode("utf-8")
+    header = html[html.index("<h2>集計</h2>") :]
+    assert "<th>Status</th>" in header
+    assert "<th>RemoteHost</th>" in header
+    assert "<th>access_count</th>" in header
+
+
+def test_import_delete_without_confirm_keeps_rows(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode()), "access_log")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    rv = client.post(
+        f"/cases/{cid}/imports/delete",
+        data={"source_filename": "access_log"},
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert rv.status_code == 200
+    assert "取り込み履歴と" in html
+    assert "1 行を消します" in html
+    conn = open_case(tmp_path, cid)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
+    conn.close()
+
+
+def test_import_delete_with_confirm_removes_file(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode()), "access_log")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    rv = client.post(
+        f"/cases/{cid}/imports/delete",
+        data={"source_filename": "access_log", "confirm": "1"},
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert "取り込みファイルを削除しました。" in html
+    conn = open_case(tmp_path, cid)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM import_files").fetchone()[0] == 0
+    conn.close()
+
+
+def test_import_delete_unknown_name_is_silent_noop(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode()), "access_log")},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+
+    rv = client.post(
+        f"/cases/{cid}/imports/delete",
+        data={"source_filename": "no-such", "confirm": "1"},
+        follow_redirects=True,
+    )
+
+    html = rv.data.decode("utf-8")
+    assert "取り込みファイルを削除しました。" not in html
+    conn = open_case(tmp_path, cid)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
+    conn.close()
+
+
+def test_second_work_get_skips_count_sql(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/filter",
+        data={
+            "identifier": ["log:datetime:Time", "log:string:Request-Method"],
+            "op": ["on_or_after", "eq"],
+            "value": ["2024-10-10T00:00:00", "GET"],
+        },
+    )
+    client.get(f"/cases/{cid}?tab=list")
+    conn = open_case(tmp_path, cid)
+    statements: list[str] = []
+    conn.set_trace_callback(statements.append)
+    conn.close()
+
+    seen: list[str] = []
+
+    def _wrap_open(data_dir, case_id):
+        inner = open_case(data_dir, case_id)
+        inner.set_trace_callback(seen.append)
+        return inner
+
+    import access_log_db.app as appmod
+    original = appmod.open_case
+    appmod.open_case = _wrap_open
+    try:
+        rv = client.get(f"/cases/{cid}?tab=list")
+    finally:
+        appmod.open_case = original
+    assert rv.status_code == 200
+    counts = [
+        sql
+        for sql in seen
+        if "COUNT(" in sql.upper() and "FROM log_rows" in sql
+    ]
+    assert counts == []
+
+
+def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.get(f"/cases/{cid}?tab=list")
+    seen: list[str] = []
+
+    import access_log_db.app as appmod
+    original = appmod.open_case
+
+    def _wrap_open(data_dir, case_id):
+        inner = original(data_dir, case_id)
+        inner.set_trace_callback(seen.append)
+        return inner
+
+    appmod.open_case = _wrap_open
+    try:
+        rv = client.get(f"/cases/{cid}?tab=ingest")
+    finally:
+        appmod.open_case = original
+    assert rv.status_code == 200
+    page = [
+        sql
+        for sql in seen
+        if "FROM log_rows" in sql and "ORDER BY r.row_id" in sql
+    ]
+    assert page == []

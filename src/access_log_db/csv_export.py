@@ -82,12 +82,16 @@ def write_aggregate_csv(rows: list[dict], path: Path) -> int:
         raise AppError("E_EXP_SYS01", MSG["E_EXP_SYS01"]) from exc
 
 
-def rows_csv_bytes(conn: sqlite3.Connection, conditions: list[Condition]) -> bytes:
+def rows_csv_bytes(
+    conn: sqlite3.Connection,
+    conditions: list[Condition],
+    match_count: int | None = None,
+) -> bytes:
     headers = _headers(conn)
     buf = io.StringIO()
     writer = _writer(buf)
     writer.writerow(headers)
-    total = count_rows(conn, conditions)
+    total = count_rows(conn, conditions) if match_count is None else match_count
     after = 0
     written = 0
     while written < total:

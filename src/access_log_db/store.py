@@ -57,6 +57,7 @@ CREATE TABLE log_values (
 );
 CREATE INDEX idx_log_values_str ON log_values(identifier, str_value);
 CREATE INDEX idx_log_values_num ON log_values(identifier, num_value);
+CREATE INDEX idx_log_rows_time_wall ON log_rows(substr(time_abs, 1, 19));
 CREATE TABLE custom_values (
   row_id INTEGER NOT NULL,
   name TEXT NOT NULL,
@@ -89,6 +90,23 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
 
 
+def _prepare_conn(conn: sqlite3.Connection) -> None:
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-262144")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_log_rows_time_wall'"
+    ).fetchone()
+    if exists is None:
+        conn.execute(
+            "CREATE INDEX idx_log_rows_time_wall ON log_rows(substr(time_abs, 1, 19))"
+        )
+        conn.execute("ANALYZE")
+        conn.commit()
+
+
 def open_case(data_dir: Path, case_id: str) -> sqlite3.Connection:
     if _public_case_id(case_id) is None:
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
@@ -97,7 +115,7 @@ def open_case(data_dir: Path, case_id: str) -> sqlite3.Connection:
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
+    _prepare_conn(conn)
     return conn
 
 
@@ -161,6 +179,7 @@ def list_cases(data_dir: Path) -> list[dict]:
                 {
                     "id": path.stem,
                     "name": meta["name"],
+                    "logformat": meta["logformat"],
                     "logformat_head": head,
                     "file_count": file_count,
                     "row_count": row_count,
