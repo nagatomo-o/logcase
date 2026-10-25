@@ -655,7 +655,7 @@ select.inp {
   border: 1px solid var(--line-2); border-radius: 3px; background: var(--surface-2);
   font-size: 11.5px;
 }
-.file-item .nm { font-family: var(--mono); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.file-item .nm { font-family: var(--mono); font-size: 11px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-item.done { background: var(--surface); }
 .prog { height: 3px; background: var(--line-2); border-radius: 2px; overflow: hidden; margin-top: 6px; }
 .prog > i { display: block; height: 100%; background: var(--accent); transition: width 0.18s linear; }

@@ -637,6 +637,16 @@ def test_second_work_get_skips_count_sql(tmp_path: Path):
     assert counts == []
 
 
+def test_ingest_tab_has_selected_file_list(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    rv = client.get(f"/cases/{cid}?tab=ingest")
+    html = rv.data.decode("utf-8")
+    assert 'id="selected-files"' in html
+    assert 'name="files"' in html
+
+
 def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
     app = create_app(tmp_path)
     app.config["TESTING"] = True

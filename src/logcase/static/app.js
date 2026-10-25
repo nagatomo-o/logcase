@@ -403,6 +403,52 @@ function initImportProgress() {
   }, 2000);
 }
 
+function initSelectedFiles() {
+  const input = document.querySelector('.drop input[name="files"]');
+  const list = document.getElementById("selected-files");
+  const hint = document.querySelector(".drop .s");
+  if (!input || !list) return;
+  const defaultHint = hint ? hint.textContent : "";
+
+  function paint() {
+    const files = Array.from(input.files || []);
+    list.replaceChildren();
+    list.hidden = files.length === 0;
+    files.forEach(function (file) {
+      const row = document.createElement("div");
+      row.className = "file-item";
+      const name = document.createElement("span");
+      name.className = "nm";
+      name.textContent = file.name;
+      row.appendChild(name);
+      list.appendChild(row);
+    });
+    if (hint) {
+      hint.textContent = files.length
+        ? files.length + " ファイルを選択中"
+        : defaultHint;
+    }
+  }
+
+  input.addEventListener("change", paint);
+  const drop = input.closest(".drop");
+  if (!drop) return;
+  drop.addEventListener("dragover", function (event) {
+    event.preventDefault();
+    drop.classList.add("over");
+  });
+  drop.addEventListener("dragleave", function () {
+    drop.classList.remove("over");
+  });
+  drop.addEventListener("drop", function (event) {
+    event.preventDefault();
+    drop.classList.remove("over");
+    if (!event.dataTransfer || !event.dataTransfer.files.length) return;
+    input.files = event.dataTransfer.files;
+    paint();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   initFilter();
   initOverlays();
@@ -414,4 +460,5 @@ document.addEventListener("DOMContentLoaded", function () {
   initCreatePreview();
   initBucketLabel();
   initImportProgress();
+  initSelectedFiles();
 });
