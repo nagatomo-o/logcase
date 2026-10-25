@@ -1,4 +1,5 @@
 import io
+import threading
 import uuid
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def test_plain_import_preserves_unicode_line_separator(tmp_path: Path):
         data={"files": (io.BytesIO(line.encode("utf-8")), "access_log")},
         content_type="multipart/form-data",
     )
+    wait_import(app, cid)
 
     conn = open_case(tmp_path, cid)
     try:
@@ -91,6 +93,26 @@ def _create_case(client, name: str) -> str:
     marker = f">{name}</a>"
     prefix = html[: html.index(marker)]
     return prefix.rsplit("/cases/", 1)[1].split('"', 1)[0]
+
+
+def wait_import(app, case_id: str) -> None:
+    app.config["IMPORT_JOBS"].wait(case_id)
+
+
+def _hold_import(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    return started, release
 
 
 def test_applied_filter_conditions_stay_on_work_page(tmp_path: Path):
@@ -358,6 +380,7 @@ def test_bulk_update_requires_server_confirmation(tmp_path: Path):
         data={"files": (io.BytesIO(b'127.0.0.1 - - [10/Oct/2000:13:55:36 -0700] "GET / HTTP/1.0" 200 1\n'), "access_log")},
         content_type="multipart/form-data",
     )
+    wait_import(app, cid)
 
     first = client.post(
         f"/cases/{cid}/bulk",
@@ -399,6 +422,7 @@ def test_mutations_clear_case_aggregate_cache(tmp_path: Path):
         },
         content_type="multipart/form-data",
     )
+    wait_import(app, cid)
     assert cid not in cache
 
     cache[cid] = [{"stale": "custom-add"}]
@@ -471,6 +495,7 @@ def test_aggregate_group_checkboxes_accept_multiple(tmp_path: Path):
         data={"files": (io.BytesIO(payload), "access_log")},
         content_type="multipart/form-data",
     )
+    wait_import(app, cid)
 
     work = client.get(f"/cases/{cid}").data.decode("utf-8")
     assert 'type="checkbox" name="group"' in work
@@ -500,6 +525,7 @@ def test_import_delete_without_confirm_keeps_rows(tmp_path: Path):
         content_type="multipart/form-data",
         follow_redirects=True,
     )
+    wait_import(app, cid)
 
     rv = client.post(
         f"/cases/{cid}/imports/delete",
@@ -527,6 +553,7 @@ def test_import_delete_with_confirm_removes_file(tmp_path: Path):
         content_type="multipart/form-data",
         follow_redirects=True,
     )
+    wait_import(app, cid)
 
     rv = client.post(
         f"/cases/{cid}/imports/delete",
@@ -553,6 +580,7 @@ def test_import_delete_unknown_name_is_silent_noop(tmp_path: Path):
         content_type="multipart/form-data",
         follow_redirects=True,
     )
+    wait_import(app, cid)
 
     rv = client.post(
         f"/cases/{cid}/imports/delete",
@@ -637,3 +665,400 @@ def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
         if "FROM log_rows" in sql and "ORDER BY r.row_id" in sql
     ]
     assert page == []
+
+
+def test_import_post_redirects_before_worker_finishes(tmp_path: Path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    rv = client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 302
+    assert started.wait(5)
+    conn = open_case(tmp_path, cid)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 0
+    finally:
+        conn.close()
+    status = client.get(f"/cases/{cid}/import/status")
+    assert status.status_code == 200
+    body = status.get_json()
+    assert body["job"] == "running"
+    assert body["files"][0]["name"] == "access_log"
+    release.set()
+    wait_import(app, cid)
+    conn = open_case(tmp_path, cid)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
+    finally:
+        conn.close()
+    done = client.get(f"/cases/{cid}/import/status").get_json()
+    assert done["job"] == "finished"
+    assert done["files"][0]["inserted_count"] == 1
+
+
+def test_import_status_unknown_case_is_404(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    rv = client.get(f"/cases/{uuid.uuid4()}/import/status")
+    assert rv.status_code == 404
+    assert rv.get_json()["job"] is None
+
+
+def test_import_rejects_second_job_while_running(tmp_path: Path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    rv = client.post(
+        f"/cases/{cid}/import",
+        data={
+            "files": (
+                io.BytesIO(LINE.replace("/index", "/other").encode("utf-8")),
+                "access_log.2",
+            )
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "この案件は取り込み中です。".encode("utf-8") in rv.data
+    release.set()
+    wait_import(app, cid)
+    conn = open_case(tmp_path, cid)
+    try:
+        names = [r[0] for r in conn.execute("SELECT source_filename FROM import_files")]
+    finally:
+        conn.close()
+    assert names == ["access_log"]
+
+
+def test_running_import_post_does_not_open_case(tmp_path: Path, monkeypatch):
+    started, release = _hold_import(monkeypatch)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+
+    import logcase.app as appmod
+
+    opened: list[str] = []
+    original = appmod.open_case
+
+    def _wrap(data_dir, case_id):
+        opened.append(case_id)
+        return original(data_dir, case_id)
+
+    appmod.open_case = _wrap
+    try:
+        rv = client.post(
+            f"/cases/{cid}/import",
+            data={
+                "files": (
+                    io.BytesIO(LINE.replace("/index", "/other").encode("utf-8")),
+                    "access_log.2",
+                )
+            },
+            content_type="multipart/form-data",
+        )
+        assert rv.status_code == 302
+        assert "tab=ingest" in rv.headers["Location"]
+        with client.session_transaction() as sess:
+            messages = [text for _, text in sess.get("_flashes", [])]
+        assert "この案件は取り込み中です。" in messages
+        assert opened == []
+    finally:
+        appmod.open_case = original
+        release.set()
+        wait_import(app, cid)
+
+
+def test_enqueue_running_race_redirects_without_error(tmp_path: Path, monkeypatch):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    jobs = app.config["IMPORT_JOBS"]
+
+    def raise_running(case_id, items, snapshot):
+        raise ValueError("running")
+
+    monkeypatch.setattr(jobs, "is_running", lambda case_id: False)
+    monkeypatch.setattr(jobs, "enqueue", raise_running)
+    rv = client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 302
+    assert "tab=ingest" in rv.headers["Location"]
+    with client.session_transaction() as sess:
+        messages = [text for _, text in sess.get("_flashes", [])]
+    assert "この案件は取り込み中です。" in messages
+
+
+def test_worker_invalidate_only_pops_aggregate_cache(tmp_path: Path, monkeypatch):
+    started, release = _hold_import(monkeypatch)
+    import logcase.app as appmod
+
+    worker_clears: list[str] = []
+    real_clear = appmod._clear_counts
+
+    def spy(case_id):
+        if threading.current_thread() is not threading.main_thread():
+            worker_clears.append(case_id)
+        return real_clear(case_id)
+
+    monkeypatch.setattr(appmod, "_clear_counts", spy)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    app.config["AGGREGATE_CACHE"][cid] = [{"access_count": 9}]
+    release.set()
+    wait_import(app, cid)
+    assert worker_clears == []
+    assert cid not in app.config["AGGREGATE_CACHE"]
+
+
+def test_finished_notice_refreshes_stale_counts(tmp_path: Path, monkeypatch):
+    started, release = _hold_import(monkeypatch)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    with client.session_transaction() as sess:
+        sess["counts_by_case"] = {
+            cid: {"key": "[]", "total_row_count": 0, "match_count": 0}
+        }
+    release.set()
+    wait_import(app, cid)
+    done = client.get(f"/cases/{cid}?tab=list")
+    html = done.data.decode("utf-8")
+    assert "まだログ行がありません" not in html
+    assert '<span>全</span><b>1</b>' in html
+    with client.session_transaction() as sess:
+        assert sess["counts_by_case"][cid]["total_row_count"] == 1
+
+
+def test_filter_during_import_redirects_to_ingest(tmp_path: Path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    rv = client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:string:RemoteHost", "op": "contains", "value": "127"},
+        follow_redirects=True,
+    )
+    assert "この案件は取り込み中です。".encode("utf-8") in rv.data
+    assert "取り込み".encode("utf-8") in rv.data
+    release.set()
+    wait_import(app, cid)
+
+
+def test_list_tab_during_import_redirects_to_ingest(tmp_path: Path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    rv = client.get(f"/cases/{cid}?tab=list", follow_redirects=True)
+    assert "この案件は取り込み中です。".encode("utf-8") in rv.data
+    listing = client.get("/")
+    assert "取り込み中".encode("utf-8") in listing.data
+    release.set()
+    wait_import(app, cid)
+
+
+def test_ingest_shows_progress_panel_while_running(tmp_path: Path, monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    from logcase import import_jobs as jobs_mod
+    real = jobs_mod.import_file
+
+    def blocked(conn, name, lines):
+        started.set()
+        release.wait(5)
+        return real(conn, name, lines)
+
+    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    rv = client.get(f"/cases/{cid}?tab=ingest")
+    html = rv.data.decode("utf-8")
+    assert 'id="import-progress"' in html
+    assert f"/cases/{cid}/import/status" in html
+    assert "取り込み開始" in html
+    assert "disabled" in html
+    release.set()
+    wait_import(app, cid)
+
+
+def test_busy_ingest_keeps_snapshotted_custom_fields(tmp_path: Path, monkeypatch):
+    started, release = _hold_import(monkeypatch)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(f"/cases/{cid}/custom", data={"name": "調査区分"})
+    client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:string:RemoteHost", "op": "contains", "value": "127"},
+    )
+    client.post(f"/cases/{cid}/filter/save", data={"name": "ループバック"})
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    assert started.wait(5)
+    rv = client.get(f"/cases/{cid}?tab=ingest")
+    html = rv.data.decode("utf-8")
+    assert 'id="import-progress"' in html
+    assert 'data-job="running"' in html
+    assert 'data-import-job="running"' in html
+    assert "custom:string:調査区分" in html
+    assert "カスタムフィールド（1）" in html
+    assert "ループバック" in html
+    assert "保存した条件（1）" in html
+    assert "まだ保存がありません。" not in html
+    job = app.config["IMPORT_JOBS"].get(cid)
+    assert job.snapshot_custom_names == ["調査区分"]
+    assert job.snapshot_named[0]["name"] == "ループバック"
+    release.set()
+    wait_import(app, cid)
+
+
+def test_finished_import_flashes_once(tmp_path: Path):
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+    first = client.get(f"/cases/{cid}?tab=ingest")
+    assert "取り込みが終わりました。".encode("utf-8") in first.data
+    second = client.get(f"/cases/{cid}?tab=ingest")
+    assert "取り込みが終わりました。".encode("utf-8") not in second.data
+
+
+def test_main_cleans_staging_before_duckdb_convert(monkeypatch, tmp_path: Path):
+    calls: list[str] = []
+    monkeypatch.chdir(tmp_path)
+
+    def clean(data_dir):
+        calls.append("clean")
+
+    def convert(data_dir):
+        calls.append("convert")
+
+    class Dummy:
+        def run(self, *args, **kwargs):
+            calls.append("run")
+
+    monkeypatch.setattr("logcase.import_jobs.clean_staging", clean)
+    monkeypatch.setattr("logcase.app.convert_all_cases", convert)
+    monkeypatch.setattr("logcase.app.use_duckdb", lambda: True)
+    monkeypatch.setattr("logcase.app.create_app", lambda data_dir: Dummy())
+    from logcase.app import main
+
+    assert main(["--port", "0"]) == 0
+    assert calls[:2] == ["clean", "convert"]

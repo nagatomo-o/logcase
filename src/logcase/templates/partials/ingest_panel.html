@@ -22,9 +22,35 @@
             同じファイル名が既にあっても追加して取り込む
           </label>
           <div style="display:flex;gap:6px;margin-top:10px">
-            <button type="submit" class="btn primary sm">{{ icon("play", 12) }}取り込み開始</button>
+            <button type="submit" class="btn primary sm"{% if import_job and import_job.job == "running" %} disabled{% endif %}>{{ icon("play", 12) }}取り込み開始</button>
           </div>
         </form>
+        {% if import_job and import_job.job %}
+        <div id="import-progress"
+             data-status-url="{{ url_for('work_import_status', case_id=case_id) }}"
+             data-job="{{ import_job.job }}"
+             style="margin-top:12px;border:1px solid var(--line);border-radius:3px;padding:10px 12px">
+          <div style="font-size:12px;margin-bottom:8px">
+            {{ import_job.done }} / {{ import_job.total }}
+            {% if import_job.job == "running" %}
+              処理中{% if import_job.current %}: {{ import_job.current }}{% endif %}
+            {% else %}
+              完了
+            {% endif %}
+          </div>
+          <ul style="margin:0;padding-left:16px;font-size:11.5px;line-height:1.7">
+            {% for f in import_job.files %}
+              <li>
+                <span class="mono">{{ f.name }}</span>
+                — {{ f.status }}
+                {% if f.status == "done" %}
+                  （読込 {{ f.read_count }} / 登録 {{ f.inserted_count }} / 破棄 {{ f.discarded_count }} / 重複 {{ f.duplicate_count }}）
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
         <div style="margin-top:12px;display:flex;gap:6px;font-size:10.5px;color:var(--faint);line-height:1.65">
           {{ icon("info", 11) }}
           <span>案件内にまったく同じログ行があれば登録しません（重複）。解釈できない行は捨て、件数に出します。途中で失敗した場合はそのファイル分を確定しません。</span>

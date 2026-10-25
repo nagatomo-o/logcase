@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import secrets
@@ -14,6 +13,7 @@ from flask import (
     Response,
     abort,
     flash,
+    has_request_context,
     jsonify,
     redirect,
     render_template,
@@ -32,7 +32,7 @@ from logcase.custom_fields import (
 )
 from logcase.errors import AppError, LogFormatError
 from logcase.filters import Condition, count_rows, fetch_rows
-from logcase.import_log import delete_imported_file, import_file, import_gzip_bytes
+from logcase.import_log import delete_imported_file
 from logcase.logformat import compile_logformat, parse_line
 from logcase.messages import MSG, msg
 from logcase.named_filters import (
@@ -42,6 +42,7 @@ from logcase.named_filters import (
 )
 from logcase.duckdb_store import convert_all_cases, use_duckdb
 from logcase.store import (
+    case_exists,
     create_case,
     delete_case,
     list_cases,
@@ -102,6 +103,30 @@ def _case_specs(case_id: str) -> list[dict]:
     return (session.get("filters_by_case") or {}).get(case_id) or []
 
 
+def _filter_specs(case_id: str) -> list[dict]:
+    filter_specs = []
+    for item in _case_specs(case_id):
+        try:
+            value = item.get("value")
+            if isinstance(value, list):
+                value_text = ",".join(str(part) for part in value)
+            else:
+                value_text = "" if value is None else str(value)
+            filter_specs.append(
+                {
+                    "identifier": item["identifier"],
+                    "source": item["source"],
+                    "field_type": item["field_type"],
+                    "op": item["op"],
+                    "encoded": f"{item['source']}:{item['field_type']}:{item['identifier']}",
+                    "value_text": value_text,
+                }
+            )
+        except (KeyError, TypeError):
+            continue
+    return filter_specs
+
+
 def _session_conditions(case_id: str) -> list[Condition]:
     valid_specs = []
     for item in _case_specs(case_id):
@@ -156,6 +181,8 @@ def _set_counts(case_id: str, total: int, match: int) -> None:
 
 
 def _clear_counts(case_id: str) -> None:
+    if not has_request_context():
+        return
     data = dict(session.get("counts_by_case") or {})
     data.pop(case_id, None)
     session["counts_by_case"] = data
@@ -190,6 +217,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
     root.mkdir(parents=True, exist_ok=True)
     app.config["DATA_DIR"] = root
     app.config.setdefault("AGGREGATE_CACHE", {})
+    from logcase.import_jobs import ImportJobStore
+
+    app.config["IMPORT_JOBS"] = ImportJobStore(root)
 
     @app.template_filter("comma")
     def comma_filter(value: object) -> str:
@@ -213,9 +243,34 @@ def create_app(data_dir: Path | None = None) -> Flask:
         ):
             abort(403)
 
+    def _busy_redirect(case_id: str):
+        if app.config["IMPORT_JOBS"].is_running(case_id):
+            _flash_code("W_WRK_BIZ06")
+            return _work_redirect(case_id, "ingest")
+        return None
+
     @app.get("/")
     def cases_view():
-        cases = list_cases(root)
+        jobs = app.config["IMPORT_JOBS"]
+        cases = list_cases(root, skip_ids=jobs.running_ids())
+        for case in cases:
+            if case.get("skipped"):
+                job = jobs.get(case["id"])
+                case.update(
+                    {
+                        "name": job.snapshot_name if job else case["id"],
+                        "logformat": job.snapshot_logformat if job else "",
+                        "logformat_head": job.snapshot_logformat_head if job else "",
+                        "file_count": job.snapshot_file_count if job else 0,
+                        "row_count": job.snapshot_row_count if job else 0,
+                        "last_import": job.snapshot_last_import if job else None,
+                        "error": None,
+                        "importing": True,
+                        "skipped": False,
+                    }
+                )
+            else:
+                case.setdefault("importing", False)
         ok = [c for c in cases if not c.get("error")]
         return render_template(
             "cases.html",
@@ -277,6 +332,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/rename")
     def cases_rename(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             rename_case(root, case_id, request.form.get("name", ""))
             _flash_code("S_CSE_OK02")
@@ -286,6 +344,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/delete")
     def cases_delete(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         if request.form.get("confirm") != "1":
             _flash_code("W_CSE_BIZ01")
             return redirect(url_for("cases_view"))
@@ -361,26 +422,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
                     rows = fetch_rows(conn, conditions, after)
             else:
                 rows = []
-            filter_specs = []
-            for item in _case_specs(case_id):
-                try:
-                    value = item.get("value")
-                    if isinstance(value, list):
-                        value_text = ",".join(str(part) for part in value)
-                    else:
-                        value_text = "" if value is None else str(value)
-                    filter_specs.append(
-                        {
-                            "identifier": item["identifier"],
-                            "source": item["source"],
-                            "field_type": item["field_type"],
-                            "op": item["op"],
-                            "encoded": f"{item['source']}:{item['field_type']}:{item['identifier']}",
-                            "value_text": value_text,
-                        }
-                    )
-                except (KeyError, TypeError):
-                    continue
+            filter_specs = _filter_specs(case_id)
             aggregate_rows = app.config["AGGREGATE_CACHE"].get(case_id) or []
             last_import = None
             if imports:
@@ -414,17 +456,67 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 "bulk_confirm": None,
                 "import_delete_confirm": None,
                 "tab": _requested_tab(),
+                "import_job": app.config["IMPORT_JOBS"].status_payload(case_id),
             }
         finally:
             conn.close()
 
+    def _work_context_busy(case_id: str) -> dict:
+        jobs = app.config["IMPORT_JOBS"]
+        job = jobs.get(case_id)
+        log_fields = list(job.snapshot_log_fields) if job else []
+        imports = list(job.snapshot_imports) if job else []
+        custom_names = list(job.snapshot_custom_names) if job else []
+        named = list(job.snapshot_named) if job else []
+        row_count = job.snapshot_row_count if job else 0
+        aggregate_rows = app.config["AGGREGATE_CACHE"].get(case_id) or []
+        agg_form = (session.get("agg_by_case") or {}).get(case_id) or {}
+        return {
+            "case_id": case_id,
+            "case_name": job.snapshot_name if job else case_id,
+            "logformat": job.snapshot_logformat if job else "",
+            "log_fields": log_fields,
+            "custom_names": custom_names,
+            "imports": imports,
+            "match_count": row_count,
+            "total_row_count": row_count,
+            "rows": [],
+            "named": named,
+            "filter_specs": _filter_specs(case_id),
+            "aggregate_rows": aggregate_rows,
+            "agg_max": max((row.get("access_count") or 0) for row in aggregate_rows)
+            if aggregate_rows
+            else 0,
+            "agg_form": agg_form,
+            "agg_groups": agg_form.get("groups") or [],
+            "has_time_axis": any(field.get("time_axis") for field in log_fields),
+            "last_import": job.snapshot_last_import if job else None,
+            "active_named": (session.get("named_by_case") or {}).get(case_id),
+            "op_labels": OP_LABELS,
+            "warn_custom_del": MSG["W_WRK_BIZ04"],
+            "bulk_confirm": None,
+            "import_delete_confirm": None,
+            "tab": "ingest",
+            "import_job": jobs.status_payload(case_id),
+        }
+
     def _render_work(case_id: str):
+        jobs = app.config["IMPORT_JOBS"]
+        if jobs.take_finished_notice(case_id):
+            _flash_code("I_WRK_INF03")
+            _clear_counts(case_id)
         try:
             after = int(request.args.get("after") or 0)
         except (TypeError, ValueError):
             after = 0
+        tab = _requested_tab()
+        if jobs.is_running(case_id) and tab != "ingest":
+            _flash_code("W_WRK_BIZ06")
+            return _work_redirect(case_id, "ingest")
+        if jobs.is_running(case_id):
+            return render_template("work.html", **_work_context_busy(case_id))
         try:
-            context = _work_context(case_id, after, _requested_tab())
+            context = _work_context(case_id, after, tab)
         except AppError as exc:
             _flash_err(exc)
             return redirect(url_for("cases_view"))
@@ -436,25 +528,34 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.get("/cases/<case_id>/more")
     def work_more(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         return _render_work(case_id)
 
     @app.post("/cases/<case_id>/import")
     def work_import(case_id: str):
+        jobs: ImportJobStore = app.config["IMPORT_JOBS"]
+        if jobs.is_running(case_id):
+            _flash_code("W_WRK_BIZ06")
+            return _work_redirect(case_id, "ingest")
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
             _flash_err(exc)
             return redirect(url_for("cases_view"))
-        files = request.files.getlist("files")
-        if not files or all(not item.filename for item in files):
-            conn.close()
-            _flash_code("E_WRK_REQ01")
-            return _work_redirect(case_id, "ingest")
-        existing = {
-            row[0] for row in conn.execute("SELECT source_filename FROM import_files")
-        }
-        confirm = request.form.get("confirm_same_name") == "1"
+        queued: list[tuple[str, bytes]] | None = None
+        snapshot: dict | None = None
         try:
+            files = request.files.getlist("files")
+            if not files or all(not item.filename for item in files):
+                _flash_code("E_WRK_REQ01")
+                return _work_redirect(case_id, "ingest")
+            existing = {
+                row[0] for row in conn.execute("SELECT source_filename FROM import_files")
+            }
+            confirm = request.form.get("confirm_same_name") == "1"
+            accepted: list[tuple[str, bytes]] = []
             for uploaded in files:
                 name = Path(uploaded.filename or "").name
                 if not _allowed_filename(name):
@@ -463,34 +564,81 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 if name in existing and not confirm:
                     _flash_code("W_WRK_BIZ01")
                     continue
-                data = uploaded.read()
-                if name.lower().endswith(".gz"):
-                    result = import_gzip_bytes(conn, name, data)
-                else:
-                    with io.TextIOWrapper(
-                        io.BytesIO(data),
-                        encoding="utf-8",
-                        errors="replace",
-                        newline="",
-                    ) as text:
-                        result = import_file(conn, name, text)
-                app.config["AGGREGATE_CACHE"].pop(case_id, None)
-                _clear_counts(case_id)
-                _flash_code(
-                    "I_WRK_INF01",
-                    read_count=result.read_count,
-                    inserted_count=result.inserted_count,
-                    discarded_count=result.discarded_count,
-                    duplicate_count=result.duplicate_count,
+                accepted.append((name, uploaded.read()))
+            if not accepted:
+                return _work_redirect(case_id, "ingest")
+            meta = conn.execute("SELECT name, logformat FROM meta").fetchone()
+            imports = conn.execute(
+                "SELECT source_filename, read_count, inserted_count, "
+                "discarded_count, duplicate_count, imported_at "
+                "FROM import_files ORDER BY id"
+            ).fetchall()
+            log_fields = conn.execute(
+                "SELECT identifier, field_type, specifier, time_axis "
+                "FROM log_fields ORDER BY display_order"
+            ).fetchall()
+            custom_names = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM custom_fields ORDER BY display_order"
                 )
+            ]
+            named = []
+            for row in conn.execute("SELECT name, spec FROM named_filters ORDER BY name"):
+                try:
+                    spec = json.loads(row["spec"])
+                except (TypeError, json.JSONDecodeError, KeyError):
+                    spec = []
+                named.append({"name": row["name"], "count": len(spec), "spec": spec})
+            snapshot = {
+                "name": meta["name"],
+                "logformat": meta["logformat"],
+                "logformat_head": (meta["logformat"] or "")[:80],
+                "row_count": conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0],
+                "file_count": len(imports),
+                "last_import": max((row["imported_at"] for row in imports), default=None),
+                "imports": [dict(zip(row.keys(), row)) for row in imports],
+                "log_fields": [dict(zip(row.keys(), row)) for row in log_fields],
+                "custom_names": custom_names,
+                "named": named,
+            }
+            queued = accepted
         except AppError as exc:
             _flash_err(exc)
+            return _work_redirect(case_id, "ingest")
         finally:
             conn.close()
+        if queued is None or snapshot is None:
+            return _work_redirect(case_id, "ingest")
+        try:
+            jobs.enqueue(case_id, queued, snapshot)
+        except ValueError as exc:
+            if "running" not in str(exc):
+                raise
+            _flash_code("W_WRK_BIZ06")
+            return _work_redirect(case_id, "ingest")
+        app.config["AGGREGATE_CACHE"].pop(case_id, None)
+        _clear_counts(case_id)
+
+        def invalidate(cid: str) -> None:
+            app.config["AGGREGATE_CACHE"].pop(cid, None)
+
+        jobs.start(case_id, lambda: open_case(root, case_id), invalidate)
+        _flash_code("I_WRK_INF02")
         return _work_redirect(case_id, "ingest")
+
+    @app.get("/cases/<case_id>/import/status")
+    def work_import_status(case_id: str):
+        if not case_exists(root, case_id):
+            return jsonify({"job": None}), 404
+        payload = app.config["IMPORT_JOBS"].status_payload(case_id)
+        return jsonify(payload)
 
     @app.post("/cases/<case_id>/imports/delete")
     def work_import_delete(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         filename = request.form.get("source_filename", "")
         warning = None
         try:
@@ -537,6 +685,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/filter")
     def work_filter(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         if request.form.get("clear") == "1":
             _set_case_filters(case_id, [])
             _set_named(case_id, None)
@@ -579,6 +730,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/filter/save")
     def work_filter_save(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -601,6 +755,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/filter/load")
     def work_filter_load(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -626,6 +783,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/custom")
     def work_custom(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -643,6 +803,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/custom/delete")
     def work_custom_delete(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         if request.form.get("confirm") != "1":
             _flash_code("W_WRK_BIZ04")
             return _work_redirect(case_id, "schema")
@@ -663,6 +826,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/cell")
     def work_cell(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -688,6 +854,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/bulk")
     def work_bulk(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -732,6 +901,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/aggregate")
     def work_aggregate(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -780,6 +952,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/export/rows")
     def export_rows(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         try:
             conn = open_case(root, case_id)
         except AppError as exc:
@@ -807,6 +982,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
 
     @app.post("/cases/<case_id>/export/aggregate")
     def export_aggregate(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
         rows = app.config["AGGREGATE_CACHE"].get(case_id) or []
         if not rows:
             try:
@@ -831,6 +1009,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     data_dir = Path.cwd() / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
+    from logcase.import_jobs import clean_staging
+
+    clean_staging(data_dir)
     if use_duckdb():
         convert_all_cases(data_dir)
     app = create_app(data_dir)

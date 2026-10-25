@@ -51,6 +51,20 @@ def test_list_cases_unreadable_v4_file_sets_error(tmp_path: Path):
     assert rows == [{"id": case_id, "error": path.name}]
 
 
+def test_list_cases_skip_ids_does_not_open_running_file(tmp_path: Path):
+    cid = create_case(tmp_path, "案件A", COMMON)
+    path = tmp_path / f"{cid}.sqlite"
+    path.write_bytes(b"not a database")
+    other = create_case(tmp_path, "案件B", COMMON)
+
+    rows = list_cases(tmp_path, skip_ids={cid})
+
+    by_id = {row["id"]: row for row in rows}
+    assert by_id[cid] == {"id": cid, "skipped": True, "error": None}
+    assert by_id[other]["name"] == "案件B"
+    assert by_id[other]["error"] is None
+
+
 def test_list_cases_skips_non_v4_name(tmp_path: Path):
     cid = create_case(tmp_path, "案件A", COMMON)
     v1 = str(uuid1())

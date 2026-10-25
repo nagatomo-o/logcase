@@ -196,11 +196,18 @@ function initMenus() {
   });
 }
 
+function importIsRunning() {
+  if (document.body.getAttribute("data-import-job") === "running") return true;
+  const progress = document.querySelector("#import-progress[data-job='running']");
+  return !!progress;
+}
+
 function initTabs() {
   const root = document.querySelector("[data-page='work']");
   if (!root) return;
   document.querySelectorAll(".tab[data-tab]").forEach(function (tab) {
     tab.addEventListener("click", function (e) {
+      if (importIsRunning()) return;
       e.preventDefault();
       const name = tab.getAttribute("data-tab");
       document.querySelectorAll(".tab[data-tab]").forEach(function (t) {
@@ -339,6 +346,63 @@ function initBucketLabel() {
   });
 }
 
+function paintImportProgress(box, data) {
+  const done = data.done || 0;
+  const total = data.total || 0;
+  const heading = box.querySelector("div");
+  if (heading) {
+    let label = "完了";
+    if (data.job === "running") {
+      label = data.current ? "処理中: " + data.current : "処理中";
+    }
+    heading.textContent = done + " / " + total + " " + label;
+  }
+  const list = box.querySelector("ul");
+  if (list) {
+    list.replaceChildren();
+    (data.files || []).forEach(function (file) {
+      const li = document.createElement("li");
+      const name = document.createElement("span");
+      name.className = "mono";
+      name.textContent = file.name || "";
+      li.appendChild(name);
+      li.appendChild(document.createTextNode(" — " + (file.status || "")));
+      if (file.status === "done") {
+        li.appendChild(document.createTextNode(
+          "（読込 " + (file.read_count || 0) +
+          " / 登録 " + (file.inserted_count || 0) +
+          " / 破棄 " + (file.discarded_count || 0) +
+          " / 重複 " + (file.duplicate_count || 0) + "）"
+        ));
+      }
+      list.appendChild(li);
+    });
+  }
+  if (data.job) box.setAttribute("data-job", data.job);
+}
+
+function initImportProgress() {
+  const box = document.getElementById("import-progress");
+  if (!box) return;
+  const url = box.getAttribute("data-status-url");
+  if (!url || box.getAttribute("data-job") !== "running") return;
+  let reloading = false;
+  const timer = setInterval(function () {
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data) return;
+        paintImportProgress(box, data);
+        if (data.job === "finished" && !reloading) {
+          reloading = true;
+          clearInterval(timer);
+          window.location.reload();
+        }
+      })
+      .catch(function () {});
+  }, 2000);
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   initFilter();
   initOverlays();
@@ -349,4 +413,5 @@ document.addEventListener("DOMContentLoaded", function () {
   initToasts();
   initCreatePreview();
   initBucketLabel();
+  initImportProgress();
 });

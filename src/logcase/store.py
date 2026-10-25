@@ -87,6 +87,10 @@ def _public_case_id(case_id: str) -> UUID | None:
     return parsed
 
 
+def case_exists(data_dir: Path, case_id: str) -> bool:
+    return _public_case_id(case_id) is not None and case_path(data_dir, case_id).is_file()
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
 
@@ -161,13 +165,22 @@ def create_case(data_dir: Path, name: str, logformat: str) -> str:
     return case_id
 
 
-def list_cases(data_dir: Path) -> list[dict]:
+def list_cases(data_dir: Path, skip_ids: set[str] | None = None) -> list[dict]:
     if not data_dir.exists():
         return []
     rows: list[dict] = []
     for path in sorted(data_dir.glob("*.sqlite")):
         if _public_case_id(path.stem) is None:
             rows.append({"id": path.stem, "error": path.name})
+            continue
+        if skip_ids and path.stem in skip_ids:
+            rows.append(
+                {
+                    "id": path.stem,
+                    "skipped": True,
+                    "error": None,
+                }
+            )
             continue
         conn = None
         try:

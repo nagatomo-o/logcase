@@ -51,6 +51,7 @@
               <div class="case-tr" data-href="{{ url_for('work_view', case_id=case.id) }}">
                 <div class="case-cell">
                   <a class="case-name" href="{{ url_for('work_view', case_id=case.id) }}">{{ case.name }}</a>
+                  {% if case.importing %}<span class="r" style="margin-left:8px">取り込み中</span>{% endif %}
                 </div>
                 <div class="case-cell" title="{{ case.logformat }}">
                   <div class="case-fmt">{{ case.logformat_head }}</div>
