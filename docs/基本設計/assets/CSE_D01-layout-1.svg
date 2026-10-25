@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540" role="img" aria-label="CSE_D01 案件一覧画面レイアウト">
+  <title>CSE_D01 案件一覧画面</title>
+  <rect x="12" y="12" width="936" height="516" rx="4" fill="#fff" stroke="#333" stroke-width="1.5"/>
+  <rect x="12" y="12" width="936" height="48" rx="4" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <rect x="12" y="44" width="936" height="16" fill="#f5f5f5"/>
+  <text x="28" y="42" font-family="sans-serif" font-size="13" fill="#333">ログケース　　　　／　案件一覧　　　　　　　　　　　　　　　　　　　　127.0.0.1:8765</text>
+
+  <text x="28" y="92" font-family="sans-serif" font-size="16" fill="#333">案件</text>
+  <text x="72" y="92" font-family="sans-serif" font-size="12" fill="#333">1 案件 = 1 LogFormat</text>
+  <rect x="788" y="72" width="136" height="28" rx="3" fill="#0b5c6e" stroke="#333" stroke-width="1"/>
+  <text x="856" y="91" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#fff">案件を作成</text>
+
+  <rect x="28" y="112" width="896" height="36" rx="3" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="40" y="134" font-family="sans-serif" font-size="11" fill="#333">列は作成時の LogFormat で確定。別書式は案件を分ける。　案件数 / ファイル数 / 行数</text>
+
+  <rect x="28" y="160" width="896" height="220" rx="3" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="40" y="184" font-family="sans-serif" font-size="12" fill="#333">案件名　|　LogFormat　|　ファイル　|　行数　|　最終取り込み　|　操作（…）</text>
+  <line x1="40" y1="196" x2="908" y2="196" stroke="#333" stroke-width="1"/>
+  <text x="40" y="224" font-family="sans-serif" font-size="12" fill="#333">行クリックで作業画面へ</text>
+  <text x="40" y="248" font-family="sans-serif" font-size="12" fill="#333">操作メニュー: 作業画面を開く / 案件名を変更 / 案件を削除</text>
+  <text x="40" y="280" font-family="sans-serif" font-size="11" fill="#333">名称変更・削除はモーダル。削除は案件名の再入力で確定。</text>
+
+  <rect x="520" y="300" width="388" height="200" rx="3" fill="#fff" stroke="#333" stroke-width="1"/>
+  <text x="536" y="324" font-family="sans-serif" font-size="12" fill="#333">右ドロワー: 案件を作成</text>
+  <text x="536" y="348" font-family="sans-serif" font-size="12" fill="#333">案件名（必須）</text>
+  <text x="536" y="372" font-family="sans-serif" font-size="12" fill="#333">LogFormat 文字列（必須）</text>
+  <text x="536" y="396" font-family="sans-serif" font-size="12" fill="#333">確定する列のプレビュー</text>
+  <rect x="680" y="448" width="88" height="28" rx="3" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="724" y="467" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">キャンセル</text>
+  <rect x="776" y="448" width="112" height="28" rx="3" fill="#0b5c6e" stroke="#333" stroke-width="1"/>
+  <text x="832" y="467" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#fff">作成する</text>
+
+  <text x="40" y="420" font-family="sans-serif" font-size="11" fill="#333">注記: ローカルのみ / 手元ファイル / バックアップなし</text>
+</svg>

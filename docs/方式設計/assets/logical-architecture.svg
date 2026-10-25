@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 420" role="img" aria-label="論理構成図">
+  <title>論理構成図</title>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#333"/>
+    </marker>
+  </defs>
+  <text x="430" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#333">ログケース 論理構成</text>
+
+  <rect x="24" y="48" width="812" height="348" rx="8" fill="none" stroke="#333" stroke-width="1.5"/>
+  <text x="40" y="72" font-family="sans-serif" font-size="13" fill="#333">利用者の Windows PC</text>
+
+  <rect x="48" y="96" width="200" height="80" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="148" y="132" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#333">ブラウザ</text>
+  <text x="148" y="154" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">ループバックのみ</text>
+
+  <line x1="248" y1="136" x2="328" y2="136" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="288" y="124" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">HTTP</text>
+  <text x="288" y="168" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">HTML</text>
+
+  <rect x="332" y="88" width="280" height="200" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="472" y="112" text-anchor="middle" font-family="sans-serif" font-size="14" fill="#333">Flask 1 プロセス</text>
+  <rect x="352" y="128" width="240" height="56" rx="4" fill="#fff" stroke="#333" stroke-width="1"/>
+  <text x="472" y="152" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">HTML 描画</text>
+  <text x="472" y="170" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">（簡易 UI）</text>
+  <rect x="352" y="196" width="240" height="72" rx="4" fill="#fff" stroke="#333" stroke-width="1"/>
+  <text x="472" y="224" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">取り込み・フィルタ</text>
+  <text x="472" y="244" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">集計・CSV（同期）</text>
+
+  <line x1="612" y1="188" x2="692" y2="188" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="652" y="176" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">ファイル</text>
+
+  <rect x="696" y="120" width="116" height="140" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="754" y="156" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">data/</text>
+  <text x="754" y="180" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">案件ごと</text>
+  <text x="754" y="200" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">SQLite</text>
+  <text x="754" y="220" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">1 ファイル</text>
+
+  <rect x="48" y="300" width="200" height="72" rx="6" fill="#fff" stroke="#333" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="148" y="330" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">Apache サーバ</text>
+  <text x="148" y="350" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">接続しない（手動コピー）</text>
+  <line x1="248" y1="336" x2="352" y2="336" stroke="#333" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="300" y="328" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#333">ログファイル</text>
+</svg>

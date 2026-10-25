@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 980" role="img" aria-label="TO-BE業務フロー">
+  <title>TO-BE業務フロー</title>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#333"/>
+    </marker>
+  </defs>
+  <text x="260" y="28" text-anchor="middle" font-family="sans-serif" font-size="16" fill="#333">TO-BE 業務フロー</text>
+  <rect x="40" y="48" width="200" height="28" rx="4" fill="#eef4ea" stroke="#333" stroke-width="1"/>
+  <text x="140" y="67" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">手動（システム外）</text>
+  <rect x="280" y="48" width="200" height="28" rx="4" fill="#f5f5f5" stroke="#333" stroke-width="1"/>
+  <text x="380" y="67" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">本システム</text>
+
+  <ellipse cx="260" cy="110" rx="52" ry="22" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="260" y="115" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">開始</text>
+  <line x1="260" y1="132" x2="260" y2="158" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="70" y="160" width="180" height="56" rx="6" fill="#eef4ea" stroke="#333" stroke-width="1.5"/>
+  <text x="160" y="184" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">LogFormat を</text>
+  <text x="160" y="202" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">サーバ設定からコピー</text>
+  <line x1="160" y1="216" x2="160" y2="248" stroke="#333" stroke-width="1.5"/>
+  <line x1="160" y1="248" x2="160" y2="258" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="70" y="260" width="180" height="56" rx="6" fill="#eef4ea" stroke="#333" stroke-width="1.5"/>
+  <text x="160" y="284" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">アクセスログを</text>
+  <text x="160" y="302" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">サーバから手元へコピー</text>
+  <line x1="160" y1="316" x2="160" y2="348" stroke="#333" stroke-width="1.5"/>
+  <line x1="160" y1="348" x2="380" y2="348" stroke="#333" stroke-width="1.5"/>
+  <line x1="380" y1="348" x2="380" y2="368" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="290" y="370" width="180" height="56" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="380" y="394" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">案件を作成</text>
+  <text x="380" y="412" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">名前と LogFormat</text>
+  <line x1="380" y1="426" x2="380" y2="456" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="290" y="458" width="180" height="48" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="380" y="487" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">ログを取り込み</text>
+  <line x1="380" y1="506" x2="380" y2="536" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="290" y="538" width="180" height="56" rx="6" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="380" y="562" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">フィルタ・分類・集計</text>
+  <text x="380" y="580" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">で調査</text>
+  <line x1="380" y1="594" x2="380" y2="624" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <polygon points="380,640 430,668 380,696 330,668" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="380" y="672" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">CSV必要?</text>
+  <line x1="430" y1="668" x2="488" y2="668" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="452" y="660" font-family="sans-serif" font-size="11" fill="#333">Yes</text>
+  <line x1="380" y1="696" x2="380" y2="790" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="388" y="750" font-family="sans-serif" font-size="11" fill="#333">No</text>
+
+  <rect x="70" y="640" width="180" height="56" rx="6" fill="#eef4ea" stroke="#333" stroke-width="1.5"/>
+  <text x="160" y="664" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">保存先を選んで</text>
+  <text x="160" y="682" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">CSV を書き出す</text>
+  <line x1="160" y1="696" x2="160" y2="790" stroke="#333" stroke-width="1.5"/>
+  <line x1="160" y1="790" x2="380" y2="790" stroke="#333" stroke-width="1.5"/>
+
+  <polygon points="380,818 430,846 380,874 330,846" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="380" y="850" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#333">案件不要?</text>
+  <line x1="430" y1="846" x2="500" y2="846" stroke="#333" stroke-width="1.5"/>
+  <line x1="500" y1="846" x2="500" y2="900" stroke="#333" stroke-width="1.5"/>
+  <line x1="500" y1="900" x2="260" y2="900" stroke="#333" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="448" y="838" font-family="sans-serif" font-size="11" fill="#333">Yes: 削除</text>
+  <line x1="380" y1="874" x2="380" y2="900" stroke="#333" stroke-width="1.5"/>
+  <line x1="380" y1="900" x2="312" y2="900" stroke="#333" stroke-width="1.5"/>
+  <text x="388" y="890" font-family="sans-serif" font-size="11" fill="#333">No</text>
+
+  <ellipse cx="260" cy="938" rx="52" ry="22" fill="#f5f5f5" stroke="#333" stroke-width="1.5"/>
+  <text x="260" y="943" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#333">終了</text>
+</svg>
