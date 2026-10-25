@@ -192,3 +192,27 @@ def test_delete_imported_file_missing_or_empty_is_noop(tmp_path: Path):
     assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM import_files").fetchone()[0] == 1
     conn.close()
+
+
+def test_import_does_not_use_executemany(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("executemany")
+
+    conn.executemany = boom
+    result = import_file(conn, "access_log", [LINE])
+    assert result.inserted_count == 1
+    conn.close()
+
+
+def test_import_keeps_comma_and_quotes_in_raw_line(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    line = LINE.replace("/index", "/a,b")
+    result = import_file(conn, "access_log", [line])
+    assert result.inserted_count == 1
+    stored = conn.execute("SELECT raw_line FROM log_rows").fetchone()[0]
+    assert stored == line.rstrip("\n")
+    conn.close()

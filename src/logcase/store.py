@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from logcase.duckdb_store import duckdb_path_for, open_or_convert, use_duckdb
+from logcase.duckdb_store import (
+    DuckConn,
+    convert_sqlite_to_duckdb,
+    open_duckdb_file,
+)
 from logcase.errors import AppError
 from logcase.logformat import compile_logformat
 from logcase.messages import MSG
 from logcase.names import validate_name
 
 SCHEMA = """
-PRAGMA journal_mode=WAL;
 CREATE TABLE meta (
   name TEXT NOT NULL,
   logformat TEXT NOT NULL,
@@ -31,7 +33,7 @@ CREATE TABLE custom_fields (
   display_order INTEGER NOT NULL
 );
 CREATE TABLE import_files (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id INTEGER PRIMARY KEY,
   source_filename TEXT NOT NULL,
   imported_at TEXT NOT NULL,
   read_count INTEGER NOT NULL,
@@ -56,9 +58,6 @@ CREATE TABLE log_values (
   num_value INTEGER,
   PRIMARY KEY (row_id, identifier)
 );
-CREATE INDEX idx_log_values_str ON log_values(identifier, str_value);
-CREATE INDEX idx_log_values_num ON log_values(identifier, num_value);
-CREATE INDEX idx_log_rows_time_wall ON log_rows(substr(time_abs, 1, 19));
 CREATE TABLE custom_values (
   row_id INTEGER NOT NULL,
   name TEXT NOT NULL,
@@ -70,10 +69,20 @@ CREATE TABLE named_filters (
   name TEXT PRIMARY KEY,
   spec TEXT NOT NULL
 );
+CREATE INDEX idx_log_values_str ON log_values(identifier, str_value);
+CREATE INDEX idx_log_values_num ON log_values(identifier, num_value);
+CREATE INDEX idx_log_rows_time_abs ON log_rows(time_abs);
+CREATE INDEX idx_log_rows_raw ON log_rows(raw_line);
+CREATE INDEX idx_log_rows_source ON log_rows(source_filename);
+CREATE INDEX idx_custom_values_str ON custom_values(name, str_value);
 """
 
 
 def case_path(data_dir: Path, case_id: str) -> Path:
+    return data_dir / f"{case_id}.duckdb"
+
+
+def sqlite_case_path(data_dir: Path, case_id: str) -> Path:
     return data_dir / f"{case_id}.sqlite"
 
 
@@ -88,45 +97,28 @@ def _public_case_id(case_id: str) -> UUID | None:
 
 
 def case_exists(data_dir: Path, case_id: str) -> bool:
-    return _public_case_id(case_id) is not None and case_path(data_dir, case_id).is_file()
+    if _public_case_id(case_id) is None:
+        return False
+    return case_path(data_dir, case_id).is_file() or sqlite_case_path(data_dir, case_id).is_file()
 
 
-def init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
+def init_schema(conn: DuckConn) -> None:
+    for stmt in SCHEMA.split(";"):
+        stmt = stmt.strip()
+        if stmt:
+            conn.execute(stmt)
 
 
-def _prepare_conn(conn: sqlite3.Connection) -> None:
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-262144")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    exists = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_log_rows_time_wall'"
-    ).fetchone()
-    if exists is None:
-        conn.execute(
-            "CREATE INDEX idx_log_rows_time_wall ON log_rows(substr(time_abs, 1, 19))"
-        )
-        conn.execute("ANALYZE")
-        conn.commit()
-
-
-def open_case(data_dir: Path, case_id: str) -> sqlite3.Connection:
+def open_case(data_dir: Path, case_id: str) -> DuckConn:
     if _public_case_id(case_id) is None:
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     path = case_path(data_dir, case_id)
+    leftover = sqlite_case_path(data_dir, case_id)
+    if not path.is_file() and leftover.is_file():
+        convert_sqlite_to_duckdb(leftover, path)
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
-    if use_duckdb():
-        try:
-            return open_or_convert(path)
-        except Exception as exc:
-            print(f"DuckDB を開けないため SQLite に戻します: {exc}", flush=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    _prepare_conn(conn)
-    return conn
+    return open_duckdb_file(path)
 
 
 def create_case(data_dir: Path, name: str, logformat: str) -> str:
@@ -135,7 +127,7 @@ def create_case(data_dir: Path, name: str, logformat: str) -> str:
     data_dir.mkdir(parents=True, exist_ok=True)
     case_id = str(uuid4())
     path = case_path(data_dir, case_id)
-    conn = sqlite3.connect(path)
+    conn = DuckConn(path)
     try:
         init_schema(conn)
         conn.execute(
@@ -169,29 +161,30 @@ def list_cases(data_dir: Path, skip_ids: set[str] | None = None) -> list[dict]:
     if not data_dir.exists():
         return []
     rows: list[dict] = []
-    for path in sorted(data_dir.glob("*.sqlite")):
+    seen: set[str] = set()
+    paths = sorted(data_dir.glob("*.duckdb"))
+    leftovers = [
+        path
+        for path in sorted(data_dir.glob("*.sqlite"))
+        if not case_path(data_dir, path.stem).is_file()
+    ]
+    for path in [*paths, *leftovers]:
+        if path.stem in seen:
+            continue
+        seen.add(path.stem)
         if _public_case_id(path.stem) is None:
             rows.append({"id": path.stem, "error": path.name})
             continue
         if skip_ids and path.stem in skip_ids:
-            rows.append(
-                {
-                    "id": path.stem,
-                    "skipped": True,
-                    "error": None,
-                }
-            )
+            rows.append({"id": path.stem, "skipped": True, "error": None})
             continue
         conn = None
         try:
-            duck_path = duckdb_path_for(path)
-            if use_duckdb() and duck_path.is_file():
-                from logcase.duckdb_store import open_duckdb_file
-
-                conn = open_duckdb_file(duck_path)
+            if path.suffix == ".sqlite":
+                convert_sqlite_to_duckdb(path, case_path(data_dir, path.stem))
+                conn = open_duckdb_file(case_path(data_dir, path.stem))
             else:
-                conn = sqlite3.connect(path)
-                conn.row_factory = sqlite3.Row
+                conn = open_duckdb_file(path)
             meta = conn.execute("SELECT name, logformat FROM meta").fetchone()
             if meta is None:
                 rows.append({"id": path.stem, "error": path.name})
@@ -232,9 +225,9 @@ def delete_case(data_dir: Path, case_id: str) -> None:
     if _public_case_id(case_id) is None:
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
     path = case_path(data_dir, case_id)
-    if not path.is_file():
+    leftover = sqlite_case_path(data_dir, case_id)
+    if not path.is_file() and not leftover.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
-    path.unlink()
-    extra = duckdb_path_for(path)
-    extra.unlink(missing_ok=True)
-    extra.with_name(extra.name + ".tmp").unlink(missing_ok=True)
+    path.unlink(missing_ok=True)
+    leftover.unlink(missing_ok=True)
+    path.with_name(path.name + ".tmp").unlink(missing_ok=True)

@@ -84,15 +84,15 @@ def test_failed_file_does_not_stop_later_files(tmp_path: Path, monkeypatch):
     from logcase import import_jobs as mod
 
     calls = {"n": 0}
-    real = mod.import_file
+    real = mod.write_parsed_import
 
-    def flaky(conn, name, lines):
+    def flaky(conn, name, parsed):
         calls["n"] += 1
         if name == "bad":
             raise RuntimeError("boom")
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(mod, "import_file", flaky)
+    monkeypatch.setattr(mod, "write_parsed_import", flaky)
     cid = create_case(tmp_path, "t", COMMON)
     store = ImportJobStore(tmp_path)
     conn = open_case(tmp_path, cid)
@@ -107,6 +107,33 @@ def test_failed_file_does_not_stop_later_files(tmp_path: Path, monkeypatch):
     conn = open_case(tmp_path, cid)
     assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
     conn.close()
+
+
+def test_ordered_write_keeps_first_file_on_duplicate(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOGCASE_IMPORT_WORKERS", "2")
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    snap = _snapshot(conn)
+    conn.close()
+    store = ImportJobStore(tmp_path)
+    first = LINE
+    second = b'10.0.0.1 - - [10/Oct/2024:13:00:00 +0900] "GET /other HTTP/1.1" 404 9\n'
+    store.enqueue(
+        cid,
+        [("first.log", first + second), ("second.log", first)],
+        snap,
+    )
+    store.start(cid, lambda: open_case(tmp_path, cid), lambda _cid: None)
+    store.wait(cid)
+    conn = open_case(tmp_path, cid)
+    rows = conn.execute(
+        "SELECT source_filename, raw_line FROM log_rows ORDER BY row_id"
+    ).fetchall()
+    conn.close()
+    assert [r["source_filename"] for r in rows] == ["first.log", "first.log"]
+    payload = store.status_payload(cid)
+    assert payload["files"][1]["inserted_count"] == 0
+    assert payload["files"][1]["duplicate_count"] == 1
 
 
 def test_clean_staging_removes_job_dir(tmp_path: Path):

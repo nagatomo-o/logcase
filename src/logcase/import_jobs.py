@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import io
 import shutil
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from logcase.import_log import import_file, import_gzip_bytes
+from logcase.import_log import (
+    import_worker_count,
+    load_import_context,
+    parse_import_bytes,
+    write_parsed_import,
+)
 
 
 def staging_root(data_dir: Path) -> Path:
@@ -248,30 +253,31 @@ class ImportJobStore:
                 return
             if job is None:
                 return
-            for item in job.files:
-                with self._lock:
-                    item.status = "running"
-                try:
-                    data = Path(item.staged_path).read_bytes()
-                    if item.name.lower().endswith(".gz"):
-                        result = import_gzip_bytes(conn, item.name, data)
-                    else:
-                        text = io.TextIOWrapper(
-                            io.BytesIO(data),
-                            encoding="utf-8",
-                            errors="replace",
-                            newline="",
-                        )
-                        result = import_file(conn, item.name, text)
+            ctx = load_import_context(conn)
+            items = list(job.files)
+            workers = import_worker_count(len(items))
+
+            def parse_one(item: FileProgress):
+                data = Path(item.staged_path).read_bytes()
+                return parse_import_bytes(item.name, data, ctx)
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = [pool.submit(parse_one, item) for item in items]
+                for item, future in zip(items, futures):
                     with self._lock:
-                        item.status = "done"
-                        item.read_count = result.read_count
-                        item.inserted_count = result.inserted_count
-                        item.discarded_count = result.discarded_count
-                        item.duplicate_count = result.duplicate_count
-                    invalidate_fn(case_id)
-                except Exception:
-                    with self._lock:
-                        item.status = "failed"
+                        item.status = "running"
+                    try:
+                        parsed = future.result()
+                        result = write_parsed_import(conn, item.name, parsed)
+                        with self._lock:
+                            item.status = "done"
+                            item.read_count = result.read_count
+                            item.inserted_count = result.inserted_count
+                            item.discarded_count = result.discarded_count
+                            item.duplicate_count = result.duplicate_count
+                        invalidate_fn(case_id)
+                    except Exception:
+                        with self._lock:
+                            item.status = "failed"
         finally:
             self._close_cleanup_and_finish(case_id, job, conn)

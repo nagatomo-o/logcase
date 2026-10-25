@@ -21,11 +21,11 @@ CHUNK = 50_000
 
 
 def engine_name() -> str:
-    return os.environ.get("LOGCASE_ENGINE", "sqlite").strip().lower()
+    return os.environ.get("LOGCASE_ENGINE", "duckdb").strip().lower()
 
 
 def use_duckdb() -> bool:
-    return engine_name() == "duckdb"
+    return engine_name() != "sqlite"
 
 
 def duckdb_path_for(sqlite_path: Path) -> Path:
@@ -88,14 +88,23 @@ class DuckConn:
         import duckdb
 
         self._con = duckdb.connect(str(path))
+        self._trace = None
 
     def execute(self, sql: str, params: Any = None) -> _Cursor:
+        if self._trace is not None:
+            self._trace(sql)
         text = sql.strip()
         upper = text.upper()
         if upper.startswith("PRAGMA"):
             return _Cursor(_EmptyResult(), [])
         if upper == "BEGIN" or upper.startswith("BEGIN "):
             self._con.begin()
+            return _Cursor(_EmptyResult(), [])
+        if upper == "COMMIT":
+            self._con.commit()
+            return _Cursor(_EmptyResult(), [])
+        if upper == "ROLLBACK":
+            self._con.rollback()
             return _Cursor(_EmptyResult(), [])
         if params is None:
             params = []
@@ -106,7 +115,12 @@ class DuckConn:
         return _Cursor(result, names)
 
     def executemany(self, sql: str, seq: Iterable[Iterable[Any]]) -> _Cursor:
-        result = self._con.executemany(sql, list(seq))
+        if self._trace is not None:
+            self._trace(sql)
+        rows = list(seq)
+        if not rows:
+            return _Cursor(_EmptyResult(), [])
+        result = self._con.executemany(sql, rows)
         names = [col[0] for col in (result.description or [])]
         return _Cursor(result, names)
 
@@ -120,7 +134,7 @@ class DuckConn:
         self._con.close()
 
     def set_trace_callback(self, callback: Any) -> None:
-        return None
+        self._trace = callback
 
 
 def _sql_ident(name: str) -> str:
@@ -205,9 +219,7 @@ def convert_sqlite_to_duckdb(sqlite_path: Path, duck_path: Path) -> None:
 
 
 def needs_convert(sqlite_path: Path, duck_path: Path) -> bool:
-    if not duck_path.is_file():
-        return True
-    return sqlite_path.stat().st_mtime > duck_path.stat().st_mtime
+    return sqlite_path.is_file() and not duck_path.is_file()
 
 
 def open_duckdb_file(duck_path: Path) -> DuckConn:

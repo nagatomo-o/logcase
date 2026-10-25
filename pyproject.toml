@@ -7,11 +7,10 @@ name = "logcase"
 version = "0.1.0"
 description = "案件ごとに Apache アクセスログを取り込み、絞り込んで集計する手元の調査ツール"
 requires-python = ">=3.12"
-dependencies = ["flask>=3.0"]
+dependencies = ["flask>=3.0", "duckdb>=1.1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-fast = ["duckdb>=1.1"]
 
 [project.scripts]
 logcase = "logcase.app:main"

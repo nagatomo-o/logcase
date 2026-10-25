@@ -104,14 +104,14 @@ def _hold_import(monkeypatch):
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
 
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     return started, release
 
 
@@ -672,14 +672,14 @@ def test_import_post_redirects_before_worker_finishes(tmp_path: Path, monkeypatc
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
 
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     app = create_app(tmp_path)
     app.config["TESTING"] = True
     client = app.test_client()
@@ -726,14 +726,14 @@ def test_import_rejects_second_job_while_running(tmp_path: Path, monkeypatch):
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
 
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     app = create_app(tmp_path)
     app.config["TESTING"] = True
     client = app.test_client()
@@ -897,14 +897,14 @@ def test_filter_during_import_redirects_to_ingest(tmp_path: Path, monkeypatch):
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
 
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     app = create_app(tmp_path)
     app.config["TESTING"] = True
     client = app.test_client()
@@ -930,14 +930,14 @@ def test_list_tab_during_import_redirects_to_ingest(tmp_path: Path, monkeypatch)
     started = threading.Event()
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     app = create_app(tmp_path)
     app.config["TESTING"] = True
     client = app.test_client()
@@ -960,14 +960,14 @@ def test_ingest_shows_progress_panel_while_running(tmp_path: Path, monkeypatch):
     started = threading.Event()
     release = threading.Event()
     from logcase import import_jobs as jobs_mod
-    real = jobs_mod.import_file
+    real = jobs_mod.write_parsed_import
 
-    def blocked(conn, name, lines):
+    def blocked(conn, name, parsed):
         started.set()
         release.wait(5)
-        return real(conn, name, lines)
+        return real(conn, name, parsed)
 
-    monkeypatch.setattr(jobs_mod, "import_file", blocked)
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", blocked)
     app = create_app(tmp_path)
     app.config["TESTING"] = True
     client = app.test_client()
