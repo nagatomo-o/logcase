@@ -93,8 +93,7 @@ def listen_host(raw: str | None = None) -> str:
 
 
 def _allowed_filename(name: str) -> bool:
-    lower = name.lower()
-    return lower.endswith(".gz") or lower.endswith("access_log") or "." not in Path(name).name
+    return bool(name)
 
 
 def _flash_code(code: str, **kwargs: object) -> None:

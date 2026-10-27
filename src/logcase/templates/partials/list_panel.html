@@ -28,7 +28,7 @@
 {% if total_row_count == 0 %}
   <div class="empty-state">
     <div class="big">まだログ行がありません</div>
-    <div class="sm">「取り込み」タブで access_log または .gz を選んでください。</div>
+    <div class="sm">「取り込み」タブでログファイルを選んでください。</div>
     <a class="btn primary" href="{{ url_for('work_view', case_id=case_id, tab='ingest') }}">{{ icon("upload", 13) }}取り込みへ</a>
   </div>
 {% else %}

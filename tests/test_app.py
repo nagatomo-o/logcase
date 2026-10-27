@@ -73,6 +73,30 @@ def test_plain_import_preserves_unicode_line_separator(tmp_path: Path):
         conn.close()
 
 
+def test_plain_import_accepts_rotated_filename(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    filename = "prod-web01-access.log-20261017"
+
+    rv = client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), filename)},
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert "access_log または .gz を選んでください。".encode("utf-8") not in rv.data
+    wait_import(app, cid)
+
+    conn = open_case(tmp_path, cid)
+    try:
+        names = [r[0] for r in conn.execute("SELECT source_filename FROM import_files")]
+        assert names == [filename]
+        assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_aggregate_export_without_result_returns_work_with_400(tmp_path: Path):
     app = create_app(tmp_path)
     client = app.test_client()
@@ -713,6 +737,8 @@ def test_ingest_tab_has_selected_file_list(tmp_path: Path):
     html = rv.data.decode("utf-8")
     assert 'id="selected-files"' in html
     assert 'name="files"' in html
+    assert "テキスト / .gz" in html
+    assert "access_log / .gz" not in html
 
 
 def test_ingest_tab_skips_log_row_page_select(tmp_path: Path):
