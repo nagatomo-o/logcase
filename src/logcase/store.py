@@ -69,6 +69,10 @@ CREATE TABLE named_filters (
   name TEXT PRIMARY KEY,
   spec TEXT NOT NULL
 );
+CREATE TABLE named_aggregates (
+  name TEXT PRIMARY KEY,
+  spec TEXT NOT NULL
+);
 CREATE INDEX idx_log_values_str ON log_values(identifier, str_value);
 CREATE INDEX idx_log_values_num ON log_values(identifier, num_value);
 CREATE INDEX idx_log_rows_time_abs ON log_rows(time_abs);
@@ -118,7 +122,11 @@ def open_case(data_dir: Path, case_id: str) -> DuckConn:
         convert_sqlite_to_duckdb(leftover, path)
     if not path.is_file():
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
-    return open_duckdb_file(path)
+    conn = open_duckdb_file(path)
+    from logcase.named_aggregates import ensure_named_aggregates
+
+    ensure_named_aggregates(conn)
+    return conn
 
 
 def create_case(data_dir: Path, name: str, logformat: str) -> str:

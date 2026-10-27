@@ -35,8 +35,15 @@ from logcase.filters import Condition, count_rows, fetch_rows
 from logcase.import_log import delete_imported_file
 from logcase.logformat import compile_logformat, parse_line
 from logcase.messages import MSG, msg
+from logcase.named_aggregates import (
+    delete_named_aggregate,
+    list_named_aggregates,
+    load_named_aggregate,
+    save_named_aggregate,
+)
 from logcase.named_filters import (
     conditions_from_spec,
+    delete_named_filter,
     load_named_filter,
     save_named_filter,
 )
@@ -160,6 +167,42 @@ def _set_agg_form(case_id: str, payload: dict) -> None:
     data = dict(session.get("agg_by_case") or {})
     data[case_id] = payload
     session["agg_by_case"] = data
+
+
+def _set_named_agg(case_id: str, name: str | None) -> None:
+    data = dict(session.get("named_agg_by_case") or {})
+    if name:
+        data[case_id] = name
+    else:
+        data.pop(case_id, None)
+    session["named_agg_by_case"] = data
+
+
+def _agg_payload_from_mapping(data: dict) -> dict:
+    groups = data.get("groups") or []
+    if not isinstance(groups, list):
+        groups = []
+    return {
+        "groups": [str(item) for item in groups],
+        "use_bucket": bool(data.get("use_bucket")),
+        "n": str(data.get("n") or "1"),
+        "unit": str(data.get("unit") or "hour"),
+        "metric_id": str(data.get("metric_id") or ""),
+        "metric_fn": str(data.get("metric_fn") or "count"),
+    }
+
+
+def _agg_payload_from_request() -> dict:
+    return _agg_payload_from_mapping(
+        {
+            "groups": request.form.getlist("group"),
+            "use_bucket": bool(request.form.get("use_bucket")),
+            "n": request.form.get("n") or "1",
+            "unit": request.form.get("unit") or "hour",
+            "metric_id": request.form.get("metric_id") or "",
+            "metric_fn": request.form.get("metric_fn") or "count",
+        }
+    )
 
 
 def _filter_cache_key(case_id: str) -> str:
@@ -385,6 +428,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 except (TypeError, json.JSONDecodeError, KeyError):
                     spec = []
                 named.append({"name": row["name"], "count": len(spec), "spec": spec})
+            named_aggregates = [
+                {"name": name} for name in list_named_aggregates(conn)
+            ]
             key = _filter_cache_key(case_id)
             cached = _get_counts(case_id)
             try:
@@ -438,6 +484,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 "total_row_count": total_row_count,
                 "rows": rows,
                 "named": named,
+                "named_aggregates": named_aggregates,
+                "active_named_agg": (session.get("named_agg_by_case") or {}).get(case_id),
                 "filter_specs": filter_specs,
                 "aggregate_rows": aggregate_rows,
                 "agg_max": max((row.get("access_count") or 0) for row in aggregate_rows)
@@ -482,6 +530,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
             "total_row_count": row_count,
             "rows": [],
             "named": named,
+            "named_aggregates": [],
+            "active_named_agg": (session.get("named_agg_by_case") or {}).get(case_id),
             "filter_specs": _filter_specs(case_id),
             "aggregate_rows": aggregate_rows,
             "agg_max": max((row.get("access_count") or 0) for row in aggregate_rows)
@@ -781,6 +831,28 @@ def create_app(data_dir: Path | None = None) -> Flask:
             conn.close()
         return _work_redirect(case_id, "list")
 
+    @app.post("/cases/<case_id>/filter/delete")
+    def work_filter_delete(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            _flash_err(exc)
+            return redirect(url_for("cases_view"))
+        try:
+            delete_named_filter(conn, request.form.get("name", ""))
+            if (session.get("named_by_case") or {}).get(case_id) == request.form.get(
+                "name", ""
+            ):
+                _set_named(case_id, None)
+        except AppError as exc:
+            _flash_err(exc)
+        finally:
+            conn.close()
+        return _work_redirect(case_id, request.form.get("tab") or "list")
+
     @app.post("/cases/<case_id>/custom")
     def work_custom(case_id: str):
         blocked = _busy_redirect(case_id)
@@ -899,6 +971,24 @@ def create_app(data_dir: Path | None = None) -> Flask:
             conn.close()
         return _work_redirect(case_id, "list")
 
+    def _apply_aggregate(conn, case_id: str, payload: dict) -> None:
+        groups = []
+        for item in payload.get("groups") or []:
+            source, identifier = str(item).split(":", 1)
+            groups.append((source, identifier))
+        bucket = None
+        if payload.get("use_bucket"):
+            bucket = (int(payload.get("n") or "0"), payload.get("unit") or "hour")
+        metrics = []
+        if payload.get("metric_id"):
+            metrics.append(
+                Metric(payload["metric_id"], payload.get("metric_fn") or "count")
+            )
+        _set_agg_form(case_id, payload)
+        app.config["AGGREGATE_CACHE"][case_id] = aggregate(
+            conn, _session_conditions(case_id), groups, bucket, metrics
+        )
+
     @app.post("/cases/<case_id>/aggregate")
     def work_aggregate(case_id: str):
         blocked = _busy_redirect(case_id)
@@ -910,42 +1000,83 @@ def create_app(data_dir: Path | None = None) -> Flask:
             _flash_err(exc)
             return redirect(url_for("cases_view"))
         try:
-            groups = []
-            for item in request.form.getlist("group"):
-                source, identifier = item.split(":", 1)
-                groups.append((source, identifier))
-            bucket = None
-            if request.form.get("use_bucket"):
-                bucket = (
-                    int(request.form.get("n") or "0"),
-                    request.form.get("unit") or "hour",
-                )
-            metrics = []
-            if request.form.get("metric_id"):
-                metrics.append(
-                    Metric(
-                        request.form["metric_id"],
-                        request.form.get("metric_fn") or "count",
-                    )
-                )
-            _set_agg_form(
-                case_id,
-                {
-                    "groups": request.form.getlist("group"),
-                    "use_bucket": bool(request.form.get("use_bucket")),
-                    "n": request.form.get("n") or "1",
-                    "unit": request.form.get("unit") or "hour",
-                    "metric_id": request.form.get("metric_id") or "",
-                    "metric_fn": request.form.get("metric_fn") or "count",
-                },
-            )
-            app.config["AGGREGATE_CACHE"][case_id] = aggregate(
-                conn, _session_conditions(case_id), groups, bucket, metrics
-            )
+            _apply_aggregate(conn, case_id, _agg_payload_from_request())
         except AppError as exc:
             _flash_err(exc)
         except ValueError:
             _flash_code("E_WRK_RNG01")
+        finally:
+            conn.close()
+        return _work_redirect(case_id, "agg")
+
+    @app.post("/cases/<case_id>/aggregate/save")
+    def work_aggregate_save(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            _flash_err(exc)
+            return redirect(url_for("cases_view"))
+        try:
+            save_named_aggregate(
+                conn,
+                request.form.get("name", ""),
+                _agg_payload_from_request(),
+                overwrite=request.form.get("overwrite") == "1",
+            )
+            _flash_code("S_WRK_OK04")
+            _set_named_agg(case_id, request.form.get("name", "").strip())
+            _set_agg_form(case_id, _agg_payload_from_request())
+        except AppError as exc:
+            _flash_err(exc)
+        finally:
+            conn.close()
+        return _work_redirect(case_id, "agg")
+
+    @app.post("/cases/<case_id>/aggregate/load")
+    def work_aggregate_load(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            _flash_err(exc)
+            return redirect(url_for("cases_view"))
+        try:
+            payload = _agg_payload_from_mapping(
+                load_named_aggregate(conn, request.form.get("name", ""))
+            )
+            _apply_aggregate(conn, case_id, payload)
+            _set_named_agg(case_id, request.form.get("name", ""))
+        except AppError as exc:
+            _flash_err(exc)
+        except ValueError:
+            _flash_code("E_WRK_RNG01")
+        finally:
+            conn.close()
+        return _work_redirect(case_id, "agg")
+
+    @app.post("/cases/<case_id>/aggregate/delete")
+    def work_aggregate_delete(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
+        try:
+            conn = open_case(root, case_id)
+        except AppError as exc:
+            _flash_err(exc)
+            return redirect(url_for("cases_view"))
+        try:
+            delete_named_aggregate(conn, request.form.get("name", ""))
+            if (session.get("named_agg_by_case") or {}).get(case_id) == request.form.get(
+                "name", ""
+            ):
+                _set_named_agg(case_id, None)
+        except AppError as exc:
+            _flash_err(exc)
         finally:
             conn.close()
         return _work_redirect(case_id, "agg")

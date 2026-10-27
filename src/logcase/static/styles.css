@@ -278,7 +278,12 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 .saved-list { display: flex; flex-direction: column; gap: 1px; }
 .saved-item {
   display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 2px;
-  cursor: pointer; font-size: 12px;
+  cursor: default; font-size: 12px;
+}
+.saved-load {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  border: none; background: none; padding: 0; cursor: pointer;
+  font: inherit; color: inherit; text-align: left;
 }
 .saved-item:hover { background: var(--surface-2); }
 .saved-item.on { background: var(--accent-soft); color: var(--accent); }
@@ -680,6 +685,13 @@ select.inp {
 /* ---------- aggregate ---------- */
 .agg-root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .agg-config { flex: none; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.agg-saved { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); max-width: 520px; }
+.agg-saved .saved-item { cursor: default; }
+.agg-saved .saved-load {
+  display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
+  border: none; background: none; padding: 0; cursor: pointer;
+  font: inherit; color: inherit; text-align: left;
+}
 .agg-row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
 .agg-block { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .agg-block > .lbl { font-size: 10.5px; color: var(--sub); letter-spacing: 0.05em; }

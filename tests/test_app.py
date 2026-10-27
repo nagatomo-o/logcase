@@ -134,6 +134,29 @@ def test_applied_filter_conditions_stay_on_work_page(tmp_path: Path):
     assert "適用中" in html
 
 
+def test_named_filter_can_be_deleted(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:string:RemoteHost", "op": "contains", "value": "127"},
+    )
+    client.post(f"/cases/{cid}/filter/save", data={"name": "ループバック"})
+    listed = client.get(f"/cases/{cid}").data.decode("utf-8")
+    assert "ループバック" in listed
+    assert 'id="del-filter-1"' in listed
+
+    gone = client.post(
+        f"/cases/{cid}/filter/delete",
+        data={"name": "ループバック"},
+        follow_redirects=True,
+    )
+    html = gone.data.decode("utf-8")
+    assert "ループバック" not in html
+    assert "まだ保存がありません。" in html
+
+
 def test_invalid_datetime_filter_keeps_entered_conditions(tmp_path: Path):
     app = create_app(tmp_path)
     app.config["TESTING"] = True
@@ -512,6 +535,51 @@ def test_aggregate_group_checkboxes_accept_multiple(tmp_path: Path):
     assert "<th>Status</th>" in header
     assert "<th>RemoteHost</th>" in header
     assert "<th>access_count</th>" in header
+
+
+def test_named_aggregate_save_and_load(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+
+    save = client.post(
+        f"/cases/{cid}/aggregate/save",
+        data={"name": "ステータス", "group": ["log:Status"]},
+        follow_redirects=True,
+    )
+    html = save.data.decode("utf-8")
+    assert "集計を保存しました。" in html
+    assert "ステータス" in html
+
+    again = client.post(
+        f"/cases/{cid}/aggregate/save",
+        data={"name": "ステータス", "group": ["log:Status"]},
+        follow_redirects=True,
+    )
+    assert "同じ名前の集計があります。".encode("utf-8") in again.data
+
+    loaded = client.post(
+        f"/cases/{cid}/aggregate/load",
+        data={"name": "ステータス"},
+        follow_redirects=True,
+    )
+    header = loaded.data.decode("utf-8")[loaded.data.decode("utf-8").index("<h2>集計</h2>") :]
+    assert "<th>Status</th>" in header
+    assert 'value="log:Status"' in header and "checked" in header
+
+    client.post(
+        f"/cases/{cid}/aggregate/delete",
+        data={"name": "ステータス"},
+        follow_redirects=True,
+    )
+    gone = client.get(f"/cases/{cid}?tab=agg").data.decode("utf-8")
+    assert "まだ保存した集計はありません。" in gone
 
 
 def test_import_delete_without_confirm_keeps_rows(tmp_path: Path):

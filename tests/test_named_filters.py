@@ -31,4 +31,8 @@ def test_save_load_overwrite(tmp_path: Path):
     with pytest.raises(AppError) as ei:
         load_named_filter(conn, "無い")
     assert ei.value.code == "E_WRK_EXS01"
+    from logcase.named_filters import delete_named_filter
+
+    delete_named_filter(conn, "成功")
+    assert list_named_filters(conn) == []
     conn.close()

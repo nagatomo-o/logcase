@@ -68,7 +68,45 @@
         <div style="font-size:10px;color:var(--faint);text-align:right">グループ単位</div>
       </div>
     </div>
+    <div class="agg-saved">
+      <div class="sec-label">
+        <span>保存した集計</span>
+        <span class="r">{{ named_aggregates|length }}</span>
+      </div>
+      {% if not named_aggregates %}
+        <div class="saved-empty">まだ保存した集計はありません。</div>
+      {% endif %}
+      <div class="saved-list">
+        {% for item in named_aggregates %}
+          <div class="saved-item{% if item.name == active_named_agg %} on{% endif %}">
+            <button type="submit" form="load-agg-{{ loop.index }}" class="saved-load">
+              {{ icon("chart", 11) }}
+              <span class="nm">{{ item.name }}</span>
+            </button>
+            <button type="submit" form="del-agg-{{ loop.index }}" class="icon-btn" title="削除" aria-label="削除">{{ icon("close", 11) }}</button>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="save-row" style="margin-top:8px">
+        <input class="mini-input" name="name" placeholder="集計名（1〜100文字）" maxlength="100">
+        <button type="submit" class="btn sm" formaction="{{ url_for('work_aggregate_save', case_id=case_id) }}">この組み合わせを保存</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px;font-size:11px;color:var(--sub)">
+        <input type="checkbox" name="overwrite" value="1">
+        同名があれば上書き
+      </label>
+    </div>
   </form>
+  {% for item in named_aggregates %}
+    <form id="load-agg-{{ loop.index }}" method="post" action="{{ url_for('work_aggregate_load', case_id=case_id) }}">
+      <input type="hidden" name="tab" value="agg">
+      <input type="hidden" name="name" value="{{ item.name }}">
+    </form>
+    <form id="del-agg-{{ loop.index }}" method="post" action="{{ url_for('work_aggregate_delete', case_id=case_id) }}">
+      <input type="hidden" name="tab" value="agg">
+      <input type="hidden" name="name" value="{{ item.name }}">
+    </form>
+  {% endfor %}
 
   {% if not aggregate_rows %}
     <div class="agg-placeholder">

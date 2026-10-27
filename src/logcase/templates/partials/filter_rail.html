@@ -101,11 +101,14 @@
         {% endif %}
         <div class="saved-list">
           {% for item in named %}
-            <button class="saved-item{% if item.name == active_named %} on{% endif %}" form="load-filter-{{ loop.index }}" type="submit">
-              {{ icon("filter", 11) }}
-              <span class="nm">{{ item.name }}</span>
-              <span class="ct">{{ item.count }}</span>
-            </button>
+            <div class="saved-item{% if item.name == active_named %} on{% endif %}">
+              <button type="submit" form="load-filter-{{ loop.index }}" class="saved-load">
+                {{ icon("filter", 11) }}
+                <span class="nm">{{ item.name }}</span>
+                <span class="ct">{{ item.count }}</span>
+              </button>
+              <button type="submit" form="del-filter-{{ loop.index }}" class="icon-btn" title="削除" aria-label="削除">{{ icon("close", 11) }}</button>
+            </div>
           {% endfor %}
         </div>
         <div class="save-row" style="margin-top:8px">
@@ -161,6 +164,10 @@
 {% for item in named %}
   <form id="load-filter-{{ loop.index }}" method="post" action="{{ url_for('work_filter_load', case_id=case_id) }}">
     <input type="hidden" name="tab" value="list">
+    <input type="hidden" name="name" value="{{ item.name }}">
+  </form>
+  <form id="del-filter-{{ loop.index }}" method="post" action="{{ url_for('work_filter_delete', case_id=case_id) }}">
+    <input type="hidden" name="tab" value="{{ tab }}">
     <input type="hidden" name="name" value="{{ item.name }}">
   </form>
 {% endfor %}
