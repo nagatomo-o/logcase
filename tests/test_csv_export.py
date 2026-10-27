@@ -246,3 +246,21 @@ def test_csv_bytes_bom_crlf(tmp_path: Path):
     assert blob.startswith(b"\xef\xbb\xbf")
     assert blob.decode("utf-8-sig") == "機能名,access_count\r\n検索,2\r\n"
     conn.close()
+
+
+def test_rows_csv_follows_time_desc_sort(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            '127.0.0.1 - - [11/Oct/2024:12:00:00 +0900] "GET /late HTTP/1.1" 200 10\n',
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /early HTTP/1.1" 200 10\n',
+            '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /same HTTP/1.1" 200 10\n',
+        ],
+    )
+    text = rows_csv_bytes(conn, [], sort="time_desc").decode("utf-8-sig")
+    rows = list(csv.DictReader(io.StringIO(text)))
+    assert [r["Request-Path"] for r in rows] == ["/late", "/same", "/early"]
+    conn.close()

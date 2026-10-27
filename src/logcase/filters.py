@@ -9,6 +9,16 @@ from logcase.errors import AppError
 from logcase.messages import MSG
 
 PAGE_SIZE = 100
+SORT_ROW_ID = "row_id"
+SORT_TIME_ASC = "time_asc"
+SORT_TIME_DESC = "time_desc"
+ALLOWED_SORTS = {SORT_ROW_ID, SORT_TIME_ASC, SORT_TIME_DESC}
+
+
+def normalize_sort(sort: str | None) -> str:
+    if sort in ALLOWED_SORTS:
+        return sort
+    return SORT_ROW_ID
 
 
 @dataclass
@@ -182,14 +192,46 @@ def fetch_rows(
     conditions: list[Condition],
     after_row_id: int,
     limit: int = PAGE_SIZE,
+    sort: str = SORT_ROW_ID,
+    after_time: str | None = None,
+    after_line_no: int = 0,
 ) -> list[dict]:
     where, params = _where(conditions)
+    sort = normalize_sort(sort)
+    time_key = "COALESCE(r.time_abs, '')"
+    if sort == SORT_TIME_ASC:
+        order = f"{time_key} ASC, r.line_no ASC, r.row_id ASC"
+        use_time_cursor = after_time is not None
+        cursor_sql = (
+            f" AND ({time_key}, r.line_no, r.row_id) > (?, ?, ?)"
+            if use_time_cursor
+            else ""
+        )
+        cursor_params: list[Any] = (
+            [after_time or "", after_line_no, after_row_id] if use_time_cursor else []
+        )
+    elif sort == SORT_TIME_DESC:
+        order = f"{time_key} DESC, r.line_no DESC, r.row_id DESC"
+        use_time_cursor = after_time is not None
+        cursor_sql = (
+            f" AND ({time_key}, r.line_no, r.row_id) < (?, ?, ?)"
+            if use_time_cursor
+            else ""
+        )
+        cursor_params = (
+            [after_time or "", after_line_no, after_row_id] if use_time_cursor else []
+        )
+    else:
+        order = "r.row_id ASC"
+        cursor_sql = " AND r.row_id > ?"
+        cursor_params = [after_row_id]
     sql = (
-        f"SELECT r.row_id, r.source_filename, r.line_no, r.time_display "
-        f"FROM log_rows r WHERE r.row_id > ? AND {where} "
-        f"ORDER BY r.row_id LIMIT ?"
+        f"SELECT r.row_id, r.source_filename, r.line_no, r.time_display, "
+        f"{time_key} AS time_abs "
+        f"FROM log_rows r WHERE {where}{cursor_sql} "
+        f"ORDER BY {order} LIMIT ?"
     )
-    rows = conn.execute(sql, [after_row_id, *params, limit]).fetchall()
+    rows = conn.execute(sql, [*params, *cursor_params, limit]).fetchall()
     log_fields = [
         r["identifier"]
         for r in conn.execute(
@@ -246,5 +288,6 @@ def fetch_rows(
         item["row_id"] = row["row_id"]
         item["source_filename"] = row["source_filename"]
         item["line_no"] = row["line_no"]
+        item["time_abs"] = row["time_abs"] or ""
         out.append(item)
     return out

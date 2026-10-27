@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from logcase.errors import AppError
-from logcase.filters import Condition, count_rows, fetch_rows
+from logcase.filters import Condition, count_rows, fetch_rows, normalize_sort
 from logcase.messages import MSG
 
 ROW_FIXED = ["行ID", "元ファイル名", "ファイル内行番号"]
@@ -39,7 +39,10 @@ def _row_values(row: dict, headers: list[str]) -> list[object]:
 
 
 def write_rows_csv(
-    conn: sqlite3.Connection, conditions: list[Condition], path: Path
+    conn: sqlite3.Connection,
+    conditions: list[Condition],
+    path: Path,
+    sort: str = "row_id",
 ) -> int:
     try:
         headers = _headers(conn)
@@ -48,15 +51,28 @@ def write_rows_csv(
             writer = csv.writer(handle, lineterminator="\r\n")
             writer.writerow(headers)
             after = 0
+            after_time = None
+            after_line_no = 0
             written = 0
+            sort = normalize_sort(sort)
             while written < total:
-                chunk = fetch_rows(conn, conditions, after, limit=5000)
+                chunk = fetch_rows(
+                    conn,
+                    conditions,
+                    after,
+                    limit=5000,
+                    sort=sort,
+                    after_time=after_time,
+                    after_line_no=after_line_no,
+                )
                 if not chunk:
                     break
                 for row in chunk:
                     writer.writerow(_row_values(row, headers))
                 written += len(chunk)
                 after = chunk[-1]["row_id"]
+                after_time = chunk[-1].get("time_abs") or ""
+                after_line_no = int(chunk[-1].get("line_no") or 0)
         return total
     except AppError:
         path.unlink(missing_ok=True)
@@ -86,6 +102,7 @@ def rows_csv_bytes(
     conn: sqlite3.Connection,
     conditions: list[Condition],
     match_count: int | None = None,
+    sort: str = "row_id",
 ) -> bytes:
     headers = _headers(conn)
     buf = io.StringIO()
@@ -93,15 +110,28 @@ def rows_csv_bytes(
     writer.writerow(headers)
     total = count_rows(conn, conditions) if match_count is None else match_count
     after = 0
+    after_time = None
+    after_line_no = 0
     written = 0
+    sort = normalize_sort(sort)
     while written < total:
-        chunk = fetch_rows(conn, conditions, after, limit=5000)
+        chunk = fetch_rows(
+            conn,
+            conditions,
+            after,
+            limit=5000,
+            sort=sort,
+            after_time=after_time,
+            after_line_no=after_line_no,
+        )
         if not chunk:
             break
         for row in chunk:
             writer.writerow(_row_values(row, headers))
         written += len(chunk)
         after = chunk[-1]["row_id"]
+        after_time = chunk[-1].get("time_abs") or ""
+        after_line_no = int(chunk[-1].get("line_no") or 0)
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
 

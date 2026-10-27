@@ -19,6 +19,20 @@
     </div>
   {% endif %}
   <span class="sp"></span>
+  {% if has_time_axis %}
+    <span class="toolbar-sep"></span>
+    <form method="post" action="{{ url_for('work_sort', case_id=case_id) }}">
+      <input type="hidden" name="tab" value="list">
+      <label class="small" style="display:flex;align-items:center;gap:6px">
+        並び
+        <select name="sort" onchange="this.form.submit()">
+          <option value="row_id"{% if list_sort == "row_id" %} selected{% endif %}>行ID（取り込み順）</option>
+          <option value="time_asc"{% if list_sort == "time_asc" %} selected{% endif %}>Time の昇順</option>
+          <option value="time_desc"{% if list_sort == "time_desc" %} selected{% endif %}>Time の降順</option>
+        </select>
+      </label>
+    </form>
+  {% endif %}
   <form method="post" action="{{ url_for('export_rows', case_id=case_id) }}">
     <input type="hidden" name="tab" value="list">
     <button class="btn sm" {% if match_count == 0 %}disabled{% endif %}>{{ icon("download", 12) }}一致行を CSV に</button>
@@ -83,9 +97,13 @@
   {% if rows %}
     <div class="list-foot">
       <span class="lf-txt">{{ rows|length }} 行を表示</span>
-      <span class="lf-note">続きは直前の行IDより後を取ります（全件は一度に載せません）</span>
+      <span class="lf-note">{% if list_sort == "row_id" %}続きは直前の行IDより後を取ります（全件は一度に載せません）{% else %}続きは直前の行より後を取ります（全件は一度に載せません）{% endif %}</span>
       <span class="sp"></span>
+      {% if list_sort == "row_id" %}
       <a class="list-more" href="{{ url_for('work_more', case_id=case_id, after=rows[-1].row_id, tab='list') }}">続き</a>
+      {% else %}
+      <a class="list-more" href="{{ url_for('work_more', case_id=case_id, after=rows[-1].row_id, after_time=rows[-1].time_abs, after_line=rows[-1].line_no, tab='list') }}">続き</a>
+      {% endif %}
     </div>
   {% endif %}
 {% endif %}

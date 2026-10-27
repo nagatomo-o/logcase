@@ -253,3 +253,93 @@ def test_starts_sql_uses_prefix_range():
     assert "row_id IN (SELECT" in sql
     assert "substr(" not in sql
     assert params == ["Request-Path", "/admin", "/admio"]
+
+
+def _time_conn(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/late", "200", "11/Oct/2024:12:00:00 +0900"),
+            _line("/early", "200", "10/Oct/2024:12:00:00 +0900"),
+            _line("/same", "200", "10/Oct/2024:12:00:00 +0900"),
+            _line("/mid", "200", "10/Oct/2024:13:00:00 +0900"),
+        ],
+    )
+    return conn
+
+
+def test_fetch_rows_default_is_row_id_asc(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    rows = fetch_rows(conn, [], after_row_id=0)
+    assert [r["row_id"] for r in rows] == [1, 2, 3, 4]
+    conn.close()
+
+
+def _reverse_same_time_line_nos(conn):
+    conn.execute("UPDATE log_rows SET line_no = 10 WHERE row_id = 2")
+    conn.execute("UPDATE log_rows SET line_no = 1 WHERE row_id = 3")
+    conn.commit()
+
+
+def test_fetch_rows_time_asc_then_line_no(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    _reverse_same_time_line_nos(conn)
+    rows = fetch_rows(conn, [], after_row_id=0, sort="time_asc")
+    assert [r["Request-Path"] for r in rows] == ["/same", "/early", "/mid", "/late"]
+    assert [r["row_id"] for r in rows] == [3, 2, 4, 1]
+    conn.close()
+
+
+def test_fetch_rows_time_desc_then_line_no_desc(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    _reverse_same_time_line_nos(conn)
+    rows = fetch_rows(conn, [], after_row_id=0, sort="time_desc")
+    assert [r["row_id"] for r in rows] == [1, 4, 2, 3]
+    conn.close()
+
+
+def test_fetch_rows_time_asc_keyset_has_no_gap_or_dup(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    _reverse_same_time_line_nos(conn)
+    page1 = fetch_rows(conn, [], after_row_id=0, limit=2, sort="time_asc")
+    assert [r["row_id"] for r in page1] == [3, 2]
+    page2 = fetch_rows(
+        conn,
+        [],
+        after_row_id=page1[-1]["row_id"],
+        limit=2,
+        sort="time_asc",
+        after_time=page1[-1]["time_abs"],
+        after_line_no=page1[-1]["line_no"],
+    )
+    assert [r["row_id"] for r in page2] == [4, 1]
+    conn.close()
+
+
+def test_fetch_rows_time_sort_without_after_time_restarts(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    page = fetch_rows(conn, [], after_row_id=3, limit=2, sort="time_asc")
+    assert [r["row_id"] for r in page] == [2, 3]
+    conn.close()
+
+
+def test_fetch_rows_empty_time_sorts_as_empty_string(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    conn.execute("UPDATE log_rows SET time_abs = NULL WHERE row_id = 1")
+    conn.commit()
+    asc = fetch_rows(conn, [], after_row_id=0, sort="time_asc")
+    assert [r["row_id"] for r in asc] == [1, 2, 3, 4]
+    assert asc[0]["time_abs"] == ""
+    desc = fetch_rows(conn, [], after_row_id=0, sort="time_desc")
+    assert desc[-1]["row_id"] == 1
+    conn.close()
+
+
+def test_fetch_rows_unknown_sort_is_row_id(tmp_path: Path):
+    conn = _time_conn(tmp_path)
+    rows = fetch_rows(conn, [], after_row_id=0, sort="nope")
+    assert [r["row_id"] for r in rows] == [1, 2, 3, 4]
+    conn.close()

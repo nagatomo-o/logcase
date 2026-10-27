@@ -31,7 +31,7 @@ from logcase.custom_fields import (
     set_custom_value,
 )
 from logcase.errors import AppError, LogFormatError
-from logcase.filters import Condition, count_rows, fetch_rows
+from logcase.filters import Condition, count_rows, fetch_rows, normalize_sort
 from logcase.import_log import delete_imported_file
 from logcase.logformat import compile_logformat, parse_line
 from logcase.messages import MSG, msg
@@ -175,6 +175,23 @@ def _set_named_agg(case_id: str, name: str | None) -> None:
     else:
         data.pop(case_id, None)
     session["named_agg_by_case"] = data
+
+
+def _session_sort(case_id: str) -> str:
+    data = session.get("sort_by_case") or {}
+    return normalize_sort(data.get(case_id))
+
+
+def _set_case_sort(case_id: str, sort: str) -> None:
+    data = dict(session.get("sort_by_case") or {})
+    data[case_id] = normalize_sort(sort)
+    session["sort_by_case"] = data
+
+
+def _effective_sort(case_id: str, has_time_axis: bool) -> str:
+    if not has_time_axis:
+        return "row_id"
+    return _session_sort(case_id)
 
 
 def _agg_payload_from_mapping(data: dict) -> dict:
@@ -401,7 +418,13 @@ def create_app(data_dir: Path | None = None) -> Flask:
             _flash_err(exc)
         return redirect(url_for("cases_view"))
 
-    def _work_context(case_id: str, after: int = 0, tab: str | None = None) -> dict:
+    def _work_context(
+        case_id: str,
+        after: int = 0,
+        tab: str | None = None,
+        after_time: str | None = None,
+        after_line_no: int = 0,
+    ) -> dict:
         conn = open_case(root, case_id)
         try:
             meta = conn.execute("SELECT name, logformat FROM meta").fetchone()
@@ -454,17 +477,40 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 except (KeyError, TypeError, ValueError):
                     conditions = []
                     match_count = count_rows(conn, conditions)
+            has_time_axis = any(field["time_axis"] for field in log_fields)
+            list_sort = _effective_sort(case_id, has_time_axis)
             current_tab = tab if tab in TABS else _requested_tab()
             if current_tab == "list" or after > 0:
                 try:
-                    rows = fetch_rows(conn, conditions, after)
+                    rows = fetch_rows(
+                        conn,
+                        conditions,
+                        after,
+                        sort=list_sort,
+                        after_time=after_time,
+                        after_line_no=after_line_no,
+                    )
                 except AppError as exc:
                     _flash_err(exc)
                     conditions = []
-                    rows = fetch_rows(conn, conditions, after)
+                    rows = fetch_rows(
+                        conn,
+                        conditions,
+                        after,
+                        sort=list_sort,
+                        after_time=after_time,
+                        after_line_no=after_line_no,
+                    )
                 except (KeyError, TypeError, ValueError):
                     conditions = []
-                    rows = fetch_rows(conn, conditions, after)
+                    rows = fetch_rows(
+                        conn,
+                        conditions,
+                        after,
+                        sort=list_sort,
+                        after_time=after_time,
+                        after_line_no=after_line_no,
+                    )
             else:
                 rows = []
             filter_specs = _filter_specs(case_id)
@@ -495,7 +541,8 @@ def create_app(data_dir: Path | None = None) -> Flask:
                     "groups"
                 )
                 or [],
-                "has_time_axis": any(field["time_axis"] for field in log_fields),
+                "has_time_axis": has_time_axis,
+                "list_sort": list_sort,
                 "last_import": last_import,
                 "active_named": (session.get("named_by_case") or {}).get(case_id),
                 "op_labels": OP_LABELS,
@@ -539,6 +586,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
             "agg_form": agg_form,
             "agg_groups": agg_form.get("groups") or [],
             "has_time_axis": any(field.get("time_axis") for field in log_fields),
+            "list_sort": "row_id",
             "last_import": job.snapshot_last_import if job else None,
             "active_named": (session.get("named_by_case") or {}).get(case_id),
             "op_labels": OP_LABELS,
@@ -558,6 +606,11 @@ def create_app(data_dir: Path | None = None) -> Flask:
             after = int(request.args.get("after") or 0)
         except (TypeError, ValueError):
             after = 0
+        after_time = request.args.get("after_time")
+        try:
+            after_line_no = int(request.args.get("after_line") or 0)
+        except (TypeError, ValueError):
+            after_line_no = 0
         tab = _requested_tab()
         if jobs.is_running(case_id) and tab != "ingest":
             _flash_code("W_WRK_BIZ06")
@@ -565,7 +618,9 @@ def create_app(data_dir: Path | None = None) -> Flask:
         if jobs.is_running(case_id):
             return render_template("work.html", **_work_context_busy(case_id))
         try:
-            context = _work_context(case_id, after, tab)
+            context = _work_context(
+                case_id, after, tab, after_time, after_line_no
+            )
         except AppError as exc:
             _flash_err(exc)
             return redirect(url_for("cases_view"))
@@ -731,6 +786,14 @@ def create_app(data_dir: Path | None = None) -> Flask:
             }
             return render_template("work.html", **context)
         return _work_redirect(case_id, "ingest")
+
+    @app.post("/cases/<case_id>/sort")
+    def work_sort(case_id: str):
+        blocked = _busy_redirect(case_id)
+        if blocked:
+            return blocked
+        _set_case_sort(case_id, request.form.get("sort") or "row_id")
+        return _work_redirect(case_id, "list")
 
     @app.post("/cases/<case_id>/filter")
     def work_filter(case_id: str):
@@ -1098,7 +1161,14 @@ def create_app(data_dir: Path | None = None) -> Flask:
                 if cached and cached.get("key") == key
                 else None
             )
-            data = rows_csv_bytes(conn, _session_conditions(case_id), match_count=match)
+            has_time = any(
+                row["time_axis"]
+                for row in conn.execute("SELECT time_axis FROM log_fields")
+            )
+            sort = _effective_sort(case_id, bool(has_time))
+            data = rows_csv_bytes(
+                conn, _session_conditions(case_id), match_count=match, sort=sort
+            )
         except AppError as exc:
             _flash_err(exc)
             return _work_redirect(case_id, "list")

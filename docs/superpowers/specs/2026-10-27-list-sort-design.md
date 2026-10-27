@@ -12,8 +12,8 @@
 | 内部値 | 画面ラベル | 並び |
 | ------ | ---------- | ---- |
 | `row_id` | 行ID（取り込み順） | `row_id` 昇順。現状と同じ |
-| `time_asc` | Time の昇順 | `time_abs` 昇順、同着は `row_id` 昇順 |
-| `time_desc` | Time の降順 | `time_abs` 降順、同着は `row_id` 降順 |
+| `time_asc` | Time の昇順 | `time_abs` 昇順、同着は `line_no`（ファイル内行番号）昇順 |
+| `time_desc` | Time の降順 | `time_abs` 降順、同着は `line_no` 降順 |
 
 初期値は `row_id`。未知の値は `row_id` に戻す。新しいメッセージコードは足さない。
 
@@ -36,7 +36,7 @@ Time が無い案件（時間軸フィールドが無い）では `time_asc` / `
 1回の件数は現状のまま。先頭はカーソルなし。
 
 - `row_id`: 今どおり `GET /cases/{case_id}/more?after={最後の行ID}&tab=list`
-- `time_asc` / `time_desc`: 同じ URL に `after_time={最後の行の time_abs}` を足す（URL エンコード）。比較は `(time_abs, row_id)` の組。昇順は組がより後、降順は組がより前。`after_time` が無い続きは先頭から取り直す
+- `time_asc` / `time_desc`: 同じ URL に `after_time={最後の行の time_abs}` と `after_line={最後の行の line_no}` を足す（URL エンコード）。比較は `(time_abs, line_no, row_id)` の組（同じ時刻・同じ行番号が複数ファイルにあるときの安定化に行IDを使う）。昇順は組がより後、降順は組がより前。`after_time` が無い続きは先頭から取り直す
 
 欠け・重複を出さない。OFFSET は使わない。フッターは Time 並びのとき「続きは直前の行より後を取ります」。行ID並びのときの文言は今のまま。
 
@@ -47,7 +47,7 @@ Time が無い案件（時間軸フィールドが無い）では `time_asc` / `
 ## 7. テスト
 
 - 初期表示は行ID昇順
-- Time 昇順は時刻、同着は行ID昇順。降順はその逆
+- Time 昇順は時刻、同着は行番号昇順。降順はその逆
 - 「続き」で欠け・重複が無い（Time 並びを含む）
 - 一致行CSVがセッションの並びと同じ
 - Time が無い案件ではセレクトが無く、CSVも行ID順

@@ -1166,3 +1166,123 @@ def test_main_cleans_staging_before_duckdb_convert(monkeypatch, tmp_path: Path):
 
     assert main(["--port", "0"]) == 0
     assert calls[:2] == ["clean", "convert"]
+
+
+def _list_row_ids(html: str) -> list[int]:
+    import re
+    return [int(x) for x in re.findall(r'class="sticky-id num">(\d+)</td>', html)]
+
+
+def test_list_sort_select_and_time_desc(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    payload = (
+        '127.0.0.1 - - [11/Oct/2024:12:00:00 +0900] "GET /late HTTP/1.1" 200 10\n'
+        '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /early HTTP/1.1" 200 10\n'
+    )
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(payload.encode()), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+    page = client.get(f"/cases/{cid}?tab=list")
+    html = page.data.decode("utf-8")
+    assert 'name="sort"' in html
+    assert "行ID（取り込み順）" in html
+    assert "Time の昇順" in html
+    assert "Time の降順" in html
+    client.post(f"/cases/{cid}/sort", data={"sort": "time_desc", "tab": "list"})
+    with client.session_transaction() as sess:
+        assert sess["sort_by_case"][cid] == "time_desc"
+    client.post(f"/cases/{cid}/sort", data={"sort": "time_asc", "tab": "list"})
+    listed = client.get(f"/cases/{cid}?tab=list").data.decode("utf-8")
+    assert _list_row_ids(listed) == [2, 1]
+    assert listed.index("/early") < listed.index("/late")
+    with client.session_transaction() as sess:
+        assert sess["sort_by_case"][cid] == "time_asc"
+
+
+def test_list_more_time_sort_uses_after_time(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    payload = (
+        '127.0.0.1 - - [10/Oct/2024:12:00:02 +0900] "GET /p2 HTTP/1.1" 200 10\n'
+        '127.0.0.1 - - [10/Oct/2024:12:00:00 +0900] "GET /p0 HTTP/1.1" 200 10\n'
+        '127.0.0.1 - - [10/Oct/2024:12:00:01 +0900] "GET /p1 HTTP/1.1" 200 10\n'
+    )
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(payload.encode()), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+    client.post(f"/cases/{cid}/sort", data={"sort": "time_asc"})
+    html = client.get(f"/cases/{cid}?tab=list").data.decode("utf-8")
+    assert "after_time=" in html
+    assert "after_line=" in html
+    assert "続きは直前の行より後を取ります" in html
+    shown = _list_row_ids(html)
+    assert shown == [2, 3, 1]
+    conn = open_case(tmp_path, cid)
+    try:
+        cursor = conn.execute(
+            "SELECT time_abs, line_no FROM log_rows WHERE row_id = ?",
+            (shown[0],),
+        ).fetchone()
+        time_abs = cursor[0]
+        line_no = cursor[1]
+    finally:
+        conn.close()
+    more = client.get(
+        f"/cases/{cid}/more",
+        query_string={
+            "after": shown[0],
+            "after_time": time_abs,
+            "after_line": line_no,
+            "tab": "list",
+        },
+    )
+    assert more.status_code == 200
+    rest = _list_row_ids(more.data.decode("utf-8"))
+    combined = [shown[0], *rest]
+    assert rest == [3, 1]
+    assert len(combined) == len(set(combined))
+    assert set(combined) == {1, 2, 3}
+
+
+def test_filter_apply_keeps_sort(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode()), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+    client.post(f"/cases/{cid}/sort", data={"sort": "time_asc"})
+    client.post(
+        f"/cases/{cid}/filter",
+        data={"identifier": "log:string:RemoteHost", "op": "contains", "value": "127"},
+    )
+    with client.session_transaction() as sess:
+        assert sess["sort_by_case"][cid] == "time_asc"
+
+
+def test_list_without_time_axis_hides_sort(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    client.post(
+        "/cases",
+        data={"name": "NoTime", "logformat": '%h %l %u \\"%r\\" %>s %b'},
+    )
+    listing = client.get("/")
+    html = listing.data.decode("utf-8")
+    marker = ">NoTime</a>"
+    prefix = html[: html.index(marker)]
+    cid = prefix.rsplit("/cases/", 1)[1].split('"', 1)[0]
+    page = client.get(f"/cases/{cid}?tab=list").data.decode("utf-8")
+    assert 'name="sort"' not in page
