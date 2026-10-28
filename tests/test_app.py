@@ -47,6 +47,26 @@ def test_non_loopback_host_is_forbidden(tmp_path: Path):
     assert rv.status_code == 403
 
 
+def test_access_log_host_is_allowed(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ACCESS_LOG_HOST", "desktop-9ji8gna")
+    app = create_app(tmp_path)
+    client = app.test_client()
+
+    rv = client.get("/", environ_overrides={"HTTP_HOST": "desktop-9ji8gna:8765"})
+
+    assert rv.status_code == 200
+
+
+def test_access_log_host_does_not_open_other_hosts(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ACCESS_LOG_HOST", "desktop-9ji8gna")
+    app = create_app(tmp_path)
+    client = app.test_client()
+
+    rv = client.get("/", environ_overrides={"HTTP_HOST": "evil.example"})
+
+    assert rv.status_code == 403
+
+
 def test_plain_import_preserves_unicode_line_separator(tmp_path: Path):
     app = create_app(tmp_path)
     client = app.test_client()

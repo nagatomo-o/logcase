@@ -81,6 +81,7 @@ OP_LABELS = {
 
 TABS = {"list", "agg", "ingest", "schema"}
 ALLOWED_BIND_HOSTS = frozenset({"127.0.0.1", "localhost", "0.0.0.0"})
+LOOPBACK_REQUEST_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
 
 def listen_host(raw: str | None = None) -> str:
@@ -90,6 +91,14 @@ def listen_host(raw: str | None = None) -> str:
     if value not in ALLOWED_BIND_HOSTS:
         return "127.0.0.1"
     return value
+
+
+def extra_allowed_hosts(raw: str | None = None) -> frozenset[str]:
+    if raw is None:
+        raw = os.environ.get("ACCESS_LOG_HOST", "")
+    return frozenset(
+        part.strip().lower() for part in str(raw).split(",") if part.strip()
+    )
 
 
 def _allowed_filename(name: str) -> bool:
@@ -279,6 +288,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
     from logcase.import_jobs import ImportJobStore
 
     app.config["IMPORT_JOBS"] = ImportJobStore(root)
+    app.config["ALLOWED_REQUEST_HOSTS"] = LOOPBACK_REQUEST_HOSTS | extra_allowed_hosts()
 
     @app.template_filter("comma")
     def comma_filter(value: object) -> str:
@@ -297,7 +307,7 @@ def create_app(data_dir: Path | None = None) -> Flask:
     @app.before_request
     def require_loopback_host():
         hostname, separator, port = request.host.lower().partition(":")
-        if hostname not in {"127.0.0.1", "localhost"} or (
+        if hostname not in app.config["ALLOWED_REQUEST_HOSTS"] or (
             separator and not port.isdigit()
         ):
             abort(403)

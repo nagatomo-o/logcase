@@ -7,6 +7,8 @@ services:
       - data:/app/data
     environment:
       ACCESS_LOG_BIND: "0.0.0.0"
+      ACCESS_LOG_HOST: ${COMPUTERNAME:-}
       LOGCASE_ENGINE: "duckdb"
+    restart: always
 volumes:
   data:
