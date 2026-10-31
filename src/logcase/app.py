@@ -610,7 +610,12 @@ def create_app(data_dir: Path | None = None) -> Flask:
     def _render_work(case_id: str):
         jobs = app.config["IMPORT_JOBS"]
         if jobs.take_finished_notice(case_id):
-            _flash_code("I_WRK_INF03")
+            job = jobs.get(case_id)
+            failed = [item for item in (job.files if job else []) if item.status == "failed"]
+            if failed:
+                flash(failed[0].error or MSG["E_WRK_SYS01"], "err")
+            else:
+                _flash_code("I_WRK_INF03")
             _clear_counts(case_id)
         try:
             after = int(request.args.get("after") or 0)

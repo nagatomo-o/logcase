@@ -3,17 +3,28 @@ from __future__ import annotations
 import shutil
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from logcase.import_log import (
-    import_worker_count,
-    load_import_context,
-    parse_import_bytes,
-    write_parsed_import,
-)
+from logcase.errors import AppError
+from logcase.import_log import import_staged_file as write_parsed_import
+from logcase.messages import MSG
+
+
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, AppError):
+        message = exc.message
+        cause = exc.__cause__
+    else:
+        message = MSG["E_WRK_SYS01"]
+        cause = exc
+    if cause is None:
+        return message
+    detail = str(cause).splitlines()[0].strip()
+    if not detail or detail == message:
+        return message
+    return f"{message} {detail[:180]}"
 
 
 def staging_root(data_dir: Path) -> Path:
@@ -35,6 +46,7 @@ class FileProgress:
     inserted_count: int = 0
     discarded_count: int = 0
     duplicate_count: int = 0
+    error: str = ""
 
 
 @dataclass
@@ -92,6 +104,7 @@ class ImportJobStore:
                         "inserted_count": item.inserted_count,
                         "discarded_count": item.discarded_count,
                         "duplicate_count": item.duplicate_count,
+                        "error": item.error,
                     }
                 )
                 if item.status == "running":
@@ -104,6 +117,7 @@ class ImportJobStore:
             "done": done,
             "total": len(files),
             "current": current,
+            "failed": any(item["status"] == "failed" for item in files),
             "files": files,
         }
 
@@ -253,31 +267,23 @@ class ImportJobStore:
                 return
             if job is None:
                 return
-            ctx = load_import_context(conn)
             items = list(job.files)
-            workers = import_worker_count(len(items))
-
-            def parse_one(item: FileProgress):
-                data = Path(item.staged_path).read_bytes()
-                return parse_import_bytes(item.name, data, ctx)
-
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(parse_one, item) for item in items]
-                for item, future in zip(items, futures):
+            for item in items:
+                with self._lock:
+                    item.status = "running"
+                try:
+                    result = write_parsed_import(conn, item.name, Path(item.staged_path))
                     with self._lock:
-                        item.status = "running"
-                    try:
-                        parsed = future.result()
-                        result = write_parsed_import(conn, item.name, parsed)
-                        with self._lock:
-                            item.status = "done"
-                            item.read_count = result.read_count
-                            item.inserted_count = result.inserted_count
-                            item.discarded_count = result.discarded_count
-                            item.duplicate_count = result.duplicate_count
-                        invalidate_fn(case_id)
-                    except Exception:
-                        with self._lock:
-                            item.status = "failed"
+                        item.status = "done"
+                        item.read_count = result.read_count
+                        item.inserted_count = result.inserted_count
+                        item.discarded_count = result.discarded_count
+                        item.duplicate_count = result.duplicate_count
+                        item.error = ""
+                    invalidate_fn(case_id)
+                except Exception as exc:
+                    with self._lock:
+                        item.status = "failed"
+                        item.error = _error_text(exc)
         finally:
             self._close_cleanup_and_finish(case_id, job, conn)

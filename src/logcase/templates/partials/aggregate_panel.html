@@ -36,6 +36,7 @@
               <option value="second" {% if agg_form.unit == "second" %}selected{% endif %}>秒</option>
               <option value="minute" {% if (agg_form.unit or "minute") == "minute" %}selected{% endif %}>分</option>
               <option value="hour" {% if agg_form.unit == "hour" %}selected{% endif %}>時間</option>
+              <option value="day" {% if agg_form.unit == "day" %}selected{% endif %}>日</option>
             </select>
             <span style="font-size:10.5px;color:var(--faint)">ごと</span>
           </div>

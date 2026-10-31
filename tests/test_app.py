@@ -534,6 +534,19 @@ def test_work_page_metric_select_has_empty_option(tmp_path: Path):
     assert '<option value=""></option>' in select
 
 
+def test_work_page_bucket_unit_includes_day(tmp_path: Path):
+    app = create_app(tmp_path)
+    client = app.test_client()
+    cid = _create_case(client, "X")
+
+    html = client.get(f"/cases/{cid}").data.decode("utf-8")
+    start = html.index('<select class="mini-select" name="unit"')
+    select = html[start : html.index("</select>", start)]
+
+    assert 'value="day"' in select
+    assert ">日<" in select
+
+
 def test_tables_do_not_wrap_cells(tmp_path: Path):
     app = create_app(tmp_path)
     client = app.test_client()
@@ -1145,6 +1158,30 @@ def test_busy_ingest_keeps_snapshotted_custom_fields(tmp_path: Path, monkeypatch
     assert job.snapshot_named[0]["name"] == "ループバック"
     release.set()
     wait_import(app, cid)
+
+
+def test_failed_import_does_not_claim_success(tmp_path: Path, monkeypatch):
+    from logcase import import_jobs as jobs_mod
+
+    def broken(conn, name, path):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(jobs_mod, "write_parsed_import", broken)
+    app = create_app(tmp_path)
+    app.config["TESTING"] = True
+    client = app.test_client()
+    cid = _create_case(client, "X")
+    client.post(
+        f"/cases/{cid}/import",
+        data={"files": (io.BytesIO(LINE.encode("utf-8")), "access_log")},
+        content_type="multipart/form-data",
+    )
+    wait_import(app, cid)
+    page = client.get(f"/cases/{cid}?tab=list")
+    body = page.data.decode("utf-8")
+    assert "取り込みが終わりました。" not in body
+    assert "取り込みに失敗しました。" in body
+    assert "まだログ行がありません" in body
 
 
 def test_finished_import_flashes_once(tmp_path: Path):

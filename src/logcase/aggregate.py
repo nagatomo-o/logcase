@@ -11,7 +11,7 @@ from logcase.filters import Condition, _where, count_rows, fetch_rows
 from logcase.messages import MSG
 
 _PAGE = 5000
-_UNITS = ("second", "minute", "hour")
+_UNITS = ("second", "minute", "hour", "day")
 
 
 @dataclass
@@ -29,7 +29,7 @@ def _has_time_axis(conn: sqlite3.Connection) -> bool:
 
 def _bucket_start(wall: str, n: int, unit: str) -> str:
     dt = datetime.strptime(wall, "%Y-%m-%dT%H:%M:%S")
-    unit_seconds = {"second": 1, "minute": 60, "hour": 3600}.get(unit)
+    unit_seconds = {"second": 1, "minute": 60, "hour": 3600, "day": 86400}.get(unit)
     if unit_seconds is None:
         raise AppError("E_WRK_RNG01", MSG["E_WRK_RNG01"])
     epoch = datetime(1970, 1, 1)

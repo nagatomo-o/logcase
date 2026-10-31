@@ -35,6 +35,8 @@
             {{ import_job.done }} / {{ import_job.total }}
             {% if import_job.job == "running" %}
               処理中{% if import_job.current %}: {{ import_job.current }}{% endif %}
+            {% elif import_job.failed %}
+              失敗
             {% else %}
               完了
             {% endif %}
@@ -46,6 +48,8 @@
                 — {{ f.status }}
                 {% if f.status == "done" %}
                   （読込 {{ f.read_count }} / 登録 {{ f.inserted_count }} / 破棄 {{ f.discarded_count }} / 重複 {{ f.duplicate_count }}）
+                {% elif f.error %}
+                  {{ f.error }}
                 {% endif %}
               </li>
             {% endfor %}

@@ -55,7 +55,7 @@ CREATE TABLE log_values (
   identifier TEXT NOT NULL,
   is_unset INTEGER NOT NULL,
   str_value TEXT,
-  num_value INTEGER,
+  num_value BIGINT,
   PRIMARY KEY (row_id, identifier)
 );
 CREATE TABLE custom_values (
@@ -113,6 +113,29 @@ def init_schema(conn: DuckConn) -> None:
             conn.execute(stmt)
 
 
+def _ensure_num_value_bigint(conn: DuckConn) -> None:
+    """Bytes などが 2^31 を超えると INT32 への書き込みがファイル全体を取り消す。"""
+    row = conn.execute(
+        "SELECT data_type FROM information_schema.columns "
+        "WHERE table_schema = 'main' AND table_name = 'log_values' "
+        "AND column_name = 'num_value'"
+    ).fetchone()
+    if row is None:
+        return
+    kind = str(row[0]).upper()
+    if "BIG" in kind or "HUGE" in kind or "INT" not in kind:
+        return
+    conn.execute("DROP INDEX IF EXISTS idx_log_values_num")
+    conn.execute("DROP INDEX IF EXISTS idx_log_values_str")
+    conn.execute("ALTER TABLE log_values ALTER num_value TYPE BIGINT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_log_values_str ON log_values(identifier, str_value)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_log_values_num ON log_values(identifier, num_value)"
+    )
+
+
 def open_case(data_dir: Path, case_id: str) -> DuckConn:
     if _public_case_id(case_id) is None:
         raise AppError("E_CSE_EXS01", MSG["E_CSE_EXS01"])
@@ -126,6 +149,7 @@ def open_case(data_dir: Path, case_id: str) -> DuckConn:
     from logcase.named_aggregates import ensure_named_aggregates
 
     ensure_named_aggregates(conn)
+    _ensure_num_value_bigint(conn)
     return conn
 
 

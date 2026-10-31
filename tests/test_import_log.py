@@ -207,6 +207,160 @@ def test_import_does_not_use_executemany(tmp_path: Path):
     conn.close()
 
 
+def test_large_byte_count_does_not_drop_the_file(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    big = 3_000_000_000
+    lines = [
+        '10.0.0.1 - - [01/Oct/2024:00:00:00 +0900] "GET /a HTTP/1.1" 200 10\n',
+        f'10.0.0.2 - - [02/Oct/2024:00:00:00 +0900] "GET /b HTTP/1.1" 200 {big}\n',
+        '10.0.0.3 - - [03/Oct/2024:00:00:00 +0900] "GET /c HTTP/1.1" 200 12\n',
+    ]
+    result = import_file(conn, "access_log", lines)
+    assert result.inserted_count == 3
+    assert result.discarded_count == 0
+    conn.close()
+    conn = open_case(tmp_path, cid)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 3
+    stored = conn.execute(
+        "SELECT num_value FROM log_values WHERE identifier = 'Bytes' AND num_value = ?",
+        (big,),
+    ).fetchone()
+    assert stored is not None
+    assert stored[0] == big
+    conn.close()
+
+
+def test_later_chunk_failure_removes_rows_already_written(tmp_path: Path, monkeypatch):
+    import logcase.import_log as import_log
+
+    monkeypatch.setattr(import_log, "CHUNK_LINES", 1)
+    calls = {"n": 0}
+    real = import_log._insert_chunk
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("boom")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(import_log, "_insert_chunk", flaky)
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    lines = [
+        '10.0.0.1 - - [01/Oct/2024:00:00:00 +0900] "GET /a HTTP/1.1" 200 10\n',
+        '10.0.0.2 - - [02/Oct/2024:00:00:00 +0900] "GET /b HTTP/1.1" 200 11\n',
+    ]
+    with pytest.raises(Exception):
+        import_file(conn, "access_log", lines)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM import_files").fetchone()[0] == 0
+    conn.close()
+
+
+def test_failed_reimport_keeps_rows_from_the_earlier_file(tmp_path: Path, monkeypatch):
+    import logcase.import_log as import_log
+
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        ['10.0.0.1 - - [01/Oct/2024:00:00:00 +0900] "GET /old HTTP/1.1" 200 10\n'],
+    )
+    monkeypatch.setattr(import_log, "CHUNK_LINES", 1)
+    calls = {"n": 0}
+    real = import_log._insert_chunk
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("boom")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(import_log, "_insert_chunk", flaky)
+    with pytest.raises(Exception):
+        import_file(
+            conn,
+            "access_log",
+            [
+                '10.0.0.2 - - [02/Oct/2024:00:00:00 +0900] "GET /new HTTP/1.1" 200 11\n',
+                '10.0.0.3 - - [03/Oct/2024:00:00:00 +0900] "GET /new2 HTTP/1.1" 200 12\n',
+            ],
+        )
+    left = [row[0] for row in conn.execute("SELECT raw_line FROM log_rows").fetchall()]
+    assert len(left) == 1
+    assert "/old" in left[0]
+    conn.close()
+
+
+def test_open_case_widens_old_int32_byte_counts(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    conn.execute("DROP INDEX IF EXISTS idx_log_values_num")
+    conn.execute("DROP INDEX IF EXISTS idx_log_values_str")
+    conn.execute("DROP TABLE log_values")
+    conn.execute(
+        """
+        CREATE TABLE log_values (
+          row_id INTEGER NOT NULL,
+          identifier TEXT NOT NULL,
+          is_unset INTEGER NOT NULL,
+          str_value TEXT,
+          num_value INTEGER,
+          PRIMARY KEY (row_id, identifier)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX idx_log_values_str ON log_values(identifier, str_value)")
+    conn.execute("CREATE INDEX idx_log_values_num ON log_values(identifier, num_value)")
+    conn.close()
+    conn = open_case(tmp_path, cid)
+    big = 3_000_000_000
+    result = import_file(
+        conn,
+        "access_log",
+        [f'10.0.0.2 - - [02/Oct/2024:00:00:00 +0900] "GET /b HTTP/1.1" 200 {big}\n'],
+    )
+    assert result.inserted_count == 1
+    conn.close()
+    conn = open_case(tmp_path, cid)
+    stored = conn.execute(
+        "SELECT num_value FROM log_values WHERE identifier = 'Bytes'"
+    ).fetchone()[0]
+    assert stored == big
+    conn.close()
+
+
+def test_staged_file_spanning_days_is_visible_after_reopen(tmp_path: Path, monkeypatch):
+    import logcase.import_log as import_log
+
+    monkeypatch.setattr(import_log, "CHUNK_LINES", 2)
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    lines = [
+        '10.0.0.1 - - [01/Oct/2024:00:00:00 +0900] "GET /a HTTP/1.1" 200 10\n',
+        '10.0.0.2 - - [02/Oct/2024:00:00:00 +0900] "GET /b HTTP/1.1" 200 11\n',
+        '10.0.0.1 - - [01/Oct/2024:00:00:00 +0900] "GET /a HTTP/1.1" 200 10\n',
+        '10.0.0.3 - - [03/Oct/2024:00:00:00 +0900] "GET /c HTTP/1.1" 200 12\n',
+    ]
+    path = tmp_path / "access_log"
+    path.write_text("".join(lines), encoding="utf-8")
+    result = import_log.import_staged_file(conn, "access_log", path)
+    assert result.read_count == 4
+    assert result.inserted_count == 3
+    assert result.duplicate_count == 1
+    conn.close()
+    conn = open_case(tmp_path, cid)
+    assert conn.execute("SELECT COUNT(*) FROM log_rows").fetchone()[0] == 3
+    days = {
+        row[0][:10]
+        for row in conn.execute("SELECT time_abs FROM log_rows").fetchall()
+    }
+    assert days == {"2024-10-01", "2024-10-02", "2024-10-03"}
+    conn.close()
+
+
 def test_import_keeps_comma_and_quotes_in_raw_line(tmp_path: Path):
     cid = create_case(tmp_path, "t", COMMON)
     conn = open_case(tmp_path, cid)

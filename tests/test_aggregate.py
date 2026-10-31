@@ -196,6 +196,27 @@ def test_minute_bucket_floors_wall_clock(tmp_path: Path):
     conn.close()
 
 
+def test_day_bucket_floors_wall_clock(tmp_path: Path):
+    cid = create_case(tmp_path, "t", COMMON)
+    conn = open_case(tmp_path, cid)
+    import_file(
+        conn,
+        "access_log",
+        [
+            _line("/a", "10/Oct/2024:12:10:00 +0900", "1"),
+            _line("/a", "10/Oct/2024:23:50:00 +0900", "1"),
+            _line("/a", "11/Oct/2024:00:10:00 +0900", "1"),
+        ],
+    )
+    rows = aggregate(conn, [], [], bucket=(1, "day"), metrics=[])
+    by = {r["bucket_start"]: r["access_count"] for r in rows}
+    assert by == {
+        "2024-10-10T00:00:00": 2,
+        "2024-10-11T00:00:00": 1,
+    }
+    conn.close()
+
+
 def test_elapsed_time_buckets_cross_calendar_units():
     assert _bucket_start(
         "2024-10-10T12:30:00", 90, "minute"

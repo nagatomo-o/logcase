@@ -354,6 +354,8 @@ function paintImportProgress(box, data) {
     let label = "完了";
     if (data.job === "running") {
       label = data.current ? "処理中: " + data.current : "処理中";
+    } else if (data.failed) {
+      label = "失敗";
     }
     heading.textContent = done + " / " + total + " " + label;
   }
@@ -374,6 +376,8 @@ function paintImportProgress(box, data) {
           " / 破棄 " + (file.discarded_count || 0) +
           " / 重複 " + (file.duplicate_count || 0) + "）"
         ));
+      } else if (file.error) {
+        li.appendChild(document.createTextNode(" " + file.error));
       }
       list.appendChild(li);
     });
